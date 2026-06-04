@@ -1,0 +1,69 @@
+# ── Large data directories ────────────────────────────────────────────────────
+# Bronze: raw monthly EOIR ZIP archives (multi-GB each)
+bronze/
+
+# Silver: canonical DuckDB database (can be rebuilt from bronze)
+silver/
+
+# Gold: small, aggregated Parquet files used by the deployed app.
+# These are intentionally committed so the site loads real data instantly.
+# data/*.parquet
+
+# Keep raw downloads and scratch exports out of Git.
+data/eoir_raw_*
+data/*.xlsx
+data/*.xls
+data/*.csv
+
+# Pipeline status is intentionally committed. It tells the app whether it is
+# using seed data or real EOIR pipeline output.
+# data/pipeline_status.json
+
+# DuckDB scratch/lock files can appear during local runs.
+*.duckdb
+*.duckdb.wal
+*.tmp.duckdb
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env/
+
+# ── OS & editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+.idea/
+.vscode/settings.json
+
+# ── Streamlit ─────────────────────────────────────────────────────────────────
+.streamlit/secrets.toml
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.bak
+*.tmp
+.cache/
+*code-workspace

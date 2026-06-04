@@ -1,0 +1,12 @@
+{
+  "last_release": "2026-06",
+  "data_source": "EOIR CASE database canonical pipeline",
+  "total_cases": 12552603,
+  "total_proceedings": 16376512,
+  "total_applications": 15921544,
+  "quality_warnings": 0,
+  "deletion_count": 0,
+  "seed_mode": false,
+  "last_run": "2026-06-04T06:33:37.864663",
+  "note": "Gold data generated from the local EOIR CASE release via ingest -> canonical -> aggregate."
+}
