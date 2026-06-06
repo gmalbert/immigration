@@ -31,6 +31,29 @@ _ROOT = Path(__file__).parent.parent
 _DATA = _ROOT / "data"
 _SILVER_DB = _ROOT / "silver" / "canonical.duckdb"
 
+ROADMAP_OUTPUTS = [
+    {"table": "judge_metrics_by_year", "label": "Judge metrics by fiscal year"},
+    {"table": "court_metrics_by_year", "label": "Court metrics by fiscal year"},
+    {"table": "nationality_metrics_by_year", "label": "Nationality outcomes by fiscal year"},
+    {"table": "representation_by_court", "label": "Representation impact by court"},
+    {"table": "representation_by_nationality", "label": "Representation impact by nationality"},
+    {"table": "case_age_by_case_type", "label": "Case age by case type"},
+    {"table": "case_age_by_judge", "label": "Case age by judge"},
+    {"table": "hearing_schedule_metrics", "label": "Hearing schedule metrics"},
+    {"table": "continuance_metrics", "label": "Continuance metrics"},
+    {"table": "bond_by_year", "label": "Bond analytics by fiscal year"},
+    {"table": "bond_by_court", "label": "Bond analytics by court"},
+    {"table": "bond_by_judge", "label": "Bond analytics by judge"},
+    {"table": "custody_transitions", "label": "Custody transitions"},
+    {"table": "appeal_outcomes_by_type", "label": "Appeal outcomes by type and party"},
+    {"table": "representation_details", "label": "Attorney and representation detail"},
+    {"table": "charge_analysis", "label": "Charge-level analysis"},
+    {"table": "charge_outcomes", "label": "Charge outcomes"},
+    {"table": "motion_activity", "label": "Motion activity"},
+    {"table": "release_snapshot_tracking", "label": "Release snapshot tracking"},
+    {"table": "data_quality_summary", "label": "Data quality audit summary"},
+]
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,6 +89,46 @@ def get_pipeline_status() -> dict:
         except Exception:
             pass
     return defaults
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_gold_table(table: str) -> Optional[pd.DataFrame]:
+    """Load an arbitrary gold-layer Parquet table by base file name."""
+    path = _DATA / f"{table}.parquet"
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except Exception as e:
+        log.warning("Failed loading %s: %s", table, e)
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def list_roadmap_outputs() -> pd.DataFrame:
+    """Return file-level metadata for implemented roadmap output tables."""
+    rows = []
+    for item in ROADMAP_OUTPUTS:
+        table = item["table"]
+        path = _DATA / f"{table}.parquet"
+        row_count = None
+        column_count = None
+        if path.exists():
+            try:
+                df = pd.read_parquet(path)
+                row_count = len(df)
+                column_count = len(df.columns)
+            except Exception as e:
+                log.warning("Failed inspecting %s: %s", table, e)
+        rows.append({
+            "table": table,
+            "label": item["label"],
+            "exists": path.exists(),
+            "rows": row_count,
+            "columns": column_count,
+            "size_kb": round(path.stat().st_size / 1024, 1) if path.exists() else None,
+        })
+    return pd.DataFrame(rows)
 
 
 # ── Gold-layer loaders (cached) ───────────────────────────────────────────────

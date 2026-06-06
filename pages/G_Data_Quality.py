@@ -10,8 +10,8 @@ from pathlib import Path
 import streamlit as st
 import pandas as pd
 
-from utils import add_sidebar
-from utils.data_loader import get_pipeline_status
+from utils import add_sidebar, clean_dataframe_columns
+from utils.data_loader import get_pipeline_status, list_roadmap_outputs, load_gold_table
 from footer import add_gavel_glimpse_footer
 from utils.quality import KNOWN_ISSUES, get_issues_by_severity
 
@@ -42,6 +42,54 @@ if status.get("seed_mode"):
         "Individual judge, court, and case records are not loaded.",
         icon="ℹ️",
     )
+
+# ── Implemented enhancement outputs ──────────────────────────────────────────
+st.markdown("---")
+st.markdown("### Implemented Data Enhancements")
+st.markdown(
+    "These precomputed files are built from the local EOIR bronze/silver pipeline and saved in `data/` "
+    "so the public app can load them quickly without querying the full DuckDB database."
+)
+
+roadmap_outputs = list_roadmap_outputs()
+if roadmap_outputs.empty:
+    st.info("No roadmap output metadata is available yet.")
+else:
+    ready_count = int(roadmap_outputs["exists"].sum())
+    total_count = len(roadmap_outputs)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Roadmap Outputs Ready", f"{ready_count}/{total_count}")
+    c2.metric("Total Output Rows", f"{int(roadmap_outputs['rows'].fillna(0).sum()):,}")
+    c3.metric("Committed Data Size", f"{roadmap_outputs['size_kb'].fillna(0).sum() / 1024:.1f} MB")
+
+    st.dataframe(
+        clean_dataframe_columns(roadmap_outputs),
+        width="stretch",
+        hide_index=True,
+    )
+
+    ready_tables = roadmap_outputs[roadmap_outputs["exists"]].copy()
+    if not ready_tables.empty:
+        selected_label = st.selectbox(
+            "Preview a precomputed enhancement table",
+            ready_tables["label"].tolist(),
+            key="roadmap_output_preview",
+        )
+        selected_table = ready_tables.loc[ready_tables["label"] == selected_label, "table"].iloc[0]
+        selected_df = load_gold_table(selected_table)
+        if selected_df is not None:
+            st.caption(f"`data/{selected_table}.parquet`")
+            st.dataframe(
+                clean_dataframe_columns(selected_df.head(500)),
+                width="stretch",
+                hide_index=True,
+            )
+            st.download_button(
+                "Download preview as CSV",
+                selected_df.head(5000).to_csv(index=False).encode("utf-8"),
+                file_name=f"{selected_table}_preview.csv",
+                mime="text/csv",
+            )
 
 # ── Known issues ──────────────────────────────────────────────────────────────
 st.markdown("---")

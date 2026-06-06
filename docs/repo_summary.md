@@ -11,6 +11,7 @@ Relief Docket is a Streamlit dashboard for understanding public EOIR immigration
 - Cases: 12,552,603
 - Proceedings: 16,376,510
 - Applications: 15,921,543
+- Extended local side tables now include schedules, charges, representative assignments, attorneys, and motions
 - App-ready outputs: committed files under `data/`
 - Large local build artifacts: ignored under `bronze/` and `silver/`
 
@@ -25,7 +26,7 @@ Relief Docket is a Streamlit dashboard for understanding public EOIR immigration
 - `pages/D_Respondents.py` - nationalities, representation, juvenile/UAC metrics
 - `pages/E_Enforcement.py` - in absentia, detention, removal, bond analytics
 - `pages/F_Judges.py` - judge metrics and comparisons
-- `pages/G_Data_Quality.py` - pipeline and quality notes
+- `pages/G_Data_Quality.py` - pipeline notes, quality notes, and preview of precomputed enhancement outputs
 - `utils/data_loader.py` - loads `data/` Parquet and JSON files
 - `utils/charts.py`, `utils/export.py`, `utils/quality.py` - shared UI helpers
 
@@ -50,6 +51,25 @@ python scripts\aggregate.py --canonical-db silver\canonical.roadmap3.duckdb
 ```
 
 The canonical script uses conservative DuckDB settings (`threads=1`, bounded memory) because the full local EOIR release is large.
+
+## Precomputed Enhancement Outputs
+
+The enhancement roadmap branch adds app-ready outputs for:
+
+- annual judge, court, and nationality metrics
+- representation impact by court and nationality
+- case age by case type and judge
+- hearing schedule and continuance metrics
+- bond analytics by year, court, and judge
+- custody transitions
+- appeal outcomes by appeal type and filed-by party
+- attorney/representative assignment aggregates
+- charge analysis and charge outcomes
+- motion activity
+- release snapshot tracking
+- data quality summary tables
+
+These files are listed in [Data Enhancement Roadmap](data_enhancement_roadmap.md) and previewed in the Streamlit Data Quality page.
 
 ## Git Behavior
 
@@ -81,4 +101,4 @@ The app should not overclaim what EOIR can prove:
 
 ## Future Data Work
 
-See [Data Enhancement Roadmap](data_enhancement_roadmap.md) for ranked suggestions that use the local `bronze/` and `silver/` layers.
+See [Data Enhancement Roadmap](data_enhancement_roadmap.md) for the implemented bronze/silver-backed data additions and remaining caveats.

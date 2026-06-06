@@ -20,6 +20,11 @@ Verified real-data counts:
 - `canonical_fed_appeals`: 180,524
 - `canonical_three_member_referrals`: 83,809
 - `canonical_nationalities`: 251
+- `canonical_schedules`: 45,806,542
+- `canonical_charges`: 18,671,152
+- `canonical_rep_assignments`: 25,944,715
+- `canonical_attorneys`: 405,545
+- `canonical_motions`: 8,314,085
 
 `data/pipeline_status.json` reports:
 
@@ -34,10 +39,12 @@ Verified real-data counts:
   - custom `--canonical-db`
   - lower-memory DuckDB settings
   - fresh-load primary-key cleanup for blank/null-character keys
-  - canonical tables for bonds, custody history, juvenile history, appeals, federal appeals, and three-member referrals
+  - canonical tables for bonds, custody history, juvenile history, appeals, federal appeals, three-member referrals, schedules, charges, representative assignments, attorneys, and motions
 - `scripts/aggregate.py` now supports:
   - custom `--canonical-db`
-  - real bond, detention, UAC, BIA/federal appeal, case-age, backlog-age, and removal-order outputs
+  - real bond, detention, UAC, BIA/federal appeal, case-age, backlog-age, removal-order, schedule, continuance, charge, motion, representation-detail, annual trend, quality-audit, and release-snapshot outputs
+- `utils/data_loader.py` exposes generic loading and metadata for implemented roadmap outputs.
+- `pages/G_Data_Quality.py` previews the new precomputed enhancement tables.
 - `pages/A_Policy_Appeals.py` avoids circuit-specific language that EOIR cannot support.
 - `pages/C_Case_Processing.py` handles a one-year backlog snapshot.
 - `pages/D_Respondents.py` clamps UAC year sliders to available real-data years.
@@ -45,16 +52,17 @@ Verified real-data counts:
 
 ## Verification Already Run
 
-These checks passed:
+These checks passed before the enhancement branch. Rerun the compile command after any further code edits:
 
 ```powershell
 python -m py_compile cases.py pages\A_Policy_Appeals.py pages\B_Courts.py pages\C_Case_Processing.py pages\D_Respondents.py pages\E_Enforcement.py pages\F_Judges.py pages\G_Data_Quality.py utils\charts.py utils\data_loader.py utils\export.py utils\eoir_api.py utils\quality.py utils\__init__.py scripts\ingest.py scripts\canonical.py scripts\aggregate.py
 ```
 
 ```powershell
-venv\Scripts\python.exe scripts\canonical.py --release 2026-06 --ingest-db silver\2026-06.core2.duckdb --canonical-db silver\canonical.roadmap3.duckdb
 venv\Scripts\python.exe scripts\aggregate.py --canonical-db silver\canonical.roadmap3.duckdb
 ```
+
+The full aggregate command above passed on this branch at `2026-06-05 22:49`, writing all core and roadmap Parquet/JSON outputs with no errors.
 
 All generated Parquet files were checked for:
 
@@ -64,6 +72,14 @@ All generated Parquet files were checked for:
 - loader availability through `utils.data_loader`
 
 The changed Streamlit pages were also executed in bare Python mode. Streamlit emitted expected `missing ScriptRunContext` warnings, but no page exceptions occurred.
+
+Roadmap tail-builder verification passed after the charge outcome query was optimized:
+
+```powershell
+venv\Scripts\python.exe -c "from pathlib import Path; from scripts.aggregate import get_con, build_extended_event_outputs, build_quality_and_snapshot_outputs, write_pipeline_status; con=get_con(Path('silver/canonical.roadmap3.duckdb')); build_extended_event_outputs(con); build_quality_and_snapshot_outputs(con); write_pipeline_status(con); con.close()"
+```
+
+That command wrote `charge_outcomes.parquet`, `motion_activity.parquet`, `representation_details.parquet`, `data_quality_summary.parquet`, `release_snapshot_tracking.parquet`, and `pipeline_status.json`.
 
 ## Files To Expect In Git Status
 
@@ -78,6 +94,8 @@ Expected tracked changes include:
 - `scripts/ingest.py`
 - `scripts/canonical.py`
 - `scripts/aggregate.py`
+- `utils/data_loader.py`
+- `pages/G_Data_Quality.py`
 - `pages/A_Policy_Appeals.py`
 - `pages/C_Case_Processing.py`
 - `pages/D_Respondents.py`
@@ -102,7 +120,5 @@ Expected ignored local artifacts include:
 ## Best Next Improvements
 
 - Add a small automated validation script that prints canonical counts, Parquet row counts, duplicate column checks, and pipeline status in one command.
-- Add source-data caveat text directly into the affected UI sections for EOIR federal appeals and detention metrics.
 - Consider external ICE/DHS data for true detention bed counts, average daily population, facility ownership, and cost.
 - Consider monthly EOIR archives or yearbook aggregates for historical backlog trends.
-

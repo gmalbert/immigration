@@ -4,6 +4,43 @@
 
 This roadmap lists suggested dashboard/data improvements that can be built from the local `bronze/` and `silver/` data layers.
 
+## Implementation Status
+
+Status as of this branch: implemented in `scripts/ingest.py`, `scripts/canonical.py`, and `scripts/aggregate.py`, with the public preview surfaced on the Data Quality page.
+
+New canonical side tables:
+
+- `canonical_schedules`
+- `canonical_charges`
+- `canonical_rep_assignments`
+- `canonical_attorneys`
+- `canonical_motions`
+
+New app-ready outputs:
+
+- `data/judge_metrics_by_year.parquet`
+- `data/court_metrics_by_year.parquet`
+- `data/nationality_metrics_by_year.parquet`
+- `data/representation_by_court.parquet`
+- `data/representation_by_nationality.parquet`
+- `data/case_age_by_case_type.parquet`
+- `data/case_age_by_judge.parquet`
+- `data/hearing_schedule_metrics.parquet`
+- `data/continuance_metrics.parquet`
+- `data/bond_by_year.parquet`
+- `data/bond_by_court.parquet`
+- `data/bond_by_judge.parquet`
+- `data/custody_transitions.parquet`
+- `data/appeal_outcomes_by_type.parquet`
+- `data/representation_details.parquet`
+- `data/charge_analysis.parquet`
+- `data/charge_outcomes.parquet`
+- `data/motion_activity.parquet`
+- `data/release_snapshot_tracking.parquet`
+- `data/data_quality_summary.parquet`
+
+Important caveat: the monthly snapshot output currently records the available June 2026 EOIR release as a baseline snapshot. True month-over-month change history still requires retaining and comparing future monthly releases.
+
 Priority is based on:
 
 - User value for a public-facing dashboard

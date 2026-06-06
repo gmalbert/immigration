@@ -33,6 +33,10 @@ flowchart TD
         X2[tbl_CustodyHistory]
         X3[tbl_JuvenileHistory]
         X4[tblAppeal / tblAppealFedCourts / tblThreeMbrReferrals]
+        X5[tbl_schedule]
+        X6[B_TblProceedCharges]
+        X7[tbl_RepsAssigned / tbl_EOIR_Attorney]
+        X8[tbl_Court_Motions]
     end
 
     T1 --> D
@@ -43,6 +47,26 @@ flowchart TD
     X2 --> D
     X3 --> D
     X4 --> D
+    X5 --> D
+    X6 --> D
+    X7 --> D
+    X8 --> D
+
+    subgraph Roadmap Gold Outputs
+        R1[annual judge/court/nationality trends]
+        R2[representation and attorney aggregates]
+        R3[case age, bond, custody, schedule, continuance]
+        R4[appeal, charge, motion, quality, release snapshot]
+    end
+
+    H --> R1
+    H --> R2
+    H --> R3
+    H --> R4
+    R1 --> I
+    R2 --> I
+    R3 --> I
+    R4 --> I
 
     subgraph Git Boundary
         C
