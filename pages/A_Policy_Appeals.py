@@ -56,12 +56,25 @@ with tab_policy:
     if pol_df is None or pol_df.empty:
         no_data_banner()
     else:
-        st.info(
-            "**Note on administrative closure:** The code didn't change — the policy behind it did. "
-            "Obama used it broadly; Trump I nearly eliminated it; Biden partially restored it; "
-            "Trump II has restricted it again.",
-            icon="ℹ️",
+        admin_closure_available = (
+            "admin_closure_rate" in pol_df.columns
+            and pol_df["admin_closure_rate"].fillna(0).max() > 0
         )
+        if admin_closure_available:
+            st.info(
+                "**Note on administrative closure:** The code didn't change — the policy behind it did. "
+                "Obama used it broadly; Trump I nearly eliminated it; Biden partially restored it; "
+                "Trump II has restricted it again.",
+                icon="ℹ️",
+            )
+        else:
+            st.info(
+                "**Administrative closure is not charted from this EOIR build.** "
+                "The current CASE proceeding outcome fields do not expose a usable administrative-closure "
+                "trend, so the dashboard does not draw a flat zero line. Terminations and in absentia "
+                "rates below are real EOIR-derived policy-sensitive measures.",
+                icon="ℹ️",
+            )
 
         year_range = st.slider(
             "Fiscal Year Range",
@@ -81,19 +94,27 @@ with tab_policy:
                 "**Administrative closure** temporarily suspends a case without dismissal. "
                 "Use varied dramatically by administration."
             )
-            fig = policy_trend_chart(chart_df, "admin_closure_rate",
-                "Administrative Closure Rate — Share of Completed Cases Administratively Closed")
-            if fig:
-                st.plotly_chart(fig, width='stretch')
+            if admin_closure_available:
+                fig = policy_trend_chart(chart_df, "admin_closure_rate",
+                    "Administrative Closure Rate - Share of Completed Cases Administratively Closed")
+                if fig:
+                    st.plotly_chart(fig, width='stretch')
+            else:
+                st.warning(
+                    "No administrative-closure outcome signal is populated in the current real-data "
+                    "policy aggregate. This is a data limitation, not evidence that administrative "
+                    "closure never occurred.",
+                    icon="⚠️",
+                )
             with st.expander("Policy context"):
                 st.markdown("""
 | Period | Policy | Effect on data |
 |---|---|---|
-| Pre-2010 | Rarely used | Near-zero rates |
-| Obama 2011–2014 | Morton Memo prosecutorial discretion; DACA priorities | Rate spikes to 10–13% |
-| Trump I 2017 | AG Sessions restricts IJ authority to close cases | Sharp decline |
-| Biden 2021 | AG Garland restores IJ authority | Partial recovery |
-| Trump II 2025 | Further restrictions | Renewed decline |
+| Pre-2010 | Rarely used | Requires a specific administrative-closure source field |
+| Obama 2011–2014 | Morton Memo prosecutorial discretion; DACA priorities | Not visible in the current proceeding outcome aggregate |
+| Trump I 2017 | AG Sessions restricts IJ authority to close cases | Not visible in the current proceeding outcome aggregate |
+| Biden 2021 | AG Garland restores IJ authority | Not visible in the current proceeding outcome aggregate |
+| Trump II 2025 | Further restrictions | Not visible in the current proceeding outcome aggregate |
                 """)
 
         with ptab2:
