@@ -50,24 +50,47 @@ def _add_admin_bands(fig: go.Figure, x_axis: str = "x") -> go.Figure:
 
 def backlog_timeline_chart(df: pd.DataFrame) -> Optional[go.Figure]:
     """
-    Line chart of pending caseload over time.
+    Chart of pending caseload over time.
     Expects columns: fiscal_year (int), pending_cases (int).
     """
     if df is None or df.empty:
         return None
-    fig = px.line(
-        df,
-        x="fiscal_year",
-        y="pending_cases",
-        labels={"fiscal_year": "Fiscal Year", "pending_cases": "Pending Cases"},
-        title="Immigration Court Backlog — Pending Cases Over Time",
-        color_discrete_sequence=["#2980b9"],
-    )
-    fig = _add_admin_bands(fig)
-    fig.update_traces(line_width=2.5)
+    plot_df = df.sort_values("fiscal_year").copy()
+    if len(plot_df) == 1:
+        year = int(plot_df["fiscal_year"].iloc[0])
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    x=[f"FY{year}"],
+                    y=[plot_df["pending_cases"].iloc[0]],
+                    marker_color="#2980b9",
+                    text=[f"{plot_df['pending_cases'].iloc[0]:,.0f}"],
+                    textposition="outside",
+                    hovertemplate="Fiscal Year: %{x}<br>Pending Cases: %{y:,}<extra></extra>",
+                )
+            ]
+        )
+        title = "Immigration Court Backlog - Current EOIR Snapshot"
+        x_title = "Snapshot Year"
+    else:
+        fig = px.line(
+            plot_df,
+            x="fiscal_year",
+            y="pending_cases",
+            markers=True,
+            labels={"fiscal_year": "Fiscal Year", "pending_cases": "Pending Cases"},
+            title="Immigration Court Backlog - Pending Cases Over Time",
+            color_discrete_sequence=["#2980b9"],
+        )
+        fig = _add_admin_bands(fig)
+        fig.update_traces(line_width=2.5, marker_size=7)
+        title = None
+        x_title = "Fiscal Year"
+    if title:
+        fig.update_layout(title=title)
     fig.update_layout(
         hovermode="x unified",
-        xaxis_title="Fiscal Year",
+        xaxis_title=x_title,
         yaxis_title="Pending Cases",
         yaxis_tickformat=",",
         plot_bgcolor="white",

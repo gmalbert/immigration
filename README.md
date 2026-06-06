@@ -46,7 +46,7 @@ These sections currently use real EOIR-derived data:
 - Policy trend metrics
 - In absentia orders
 - In absentia rates by court
-- A current backlog snapshot
+- A derived annual backlog timeline
 - BIA appeals
 - Federal court appeal records
 - Bond analytics

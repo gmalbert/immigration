@@ -38,6 +38,7 @@ def get_canonical_con(db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
     # more reliable on ordinary laptops than DuckDB's default parallelism.
     con.execute("PRAGMA threads=1")
     con.execute("PRAGMA memory_limit='4GB'")
+    con.execute("PRAGMA preserve_insertion_order=false")
     return con
 
 
@@ -226,6 +227,88 @@ def init_canonical(con: duckdb.DuckDBPyConnection) -> None:
         )
     """)
 
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_schedules (
+            IDNSCHEDULE            TEXT,
+            IDNPROCEEDING          TEXT,
+            IDNCASE                TEXT,
+            HEARING_LOC_CODE       TEXT,
+            BASE_CITY_CODE         TEXT,
+            IJ_CODE                TEXT,
+            ADJ_DATE               TEXT,
+            ADJ_RSN                TEXT,
+            ADJ_MEDIUM             TEXT,
+            ADJ_ELAP_DAYS          TEXT,
+            SCHEDULE_TYPE          TEXT,
+            CAL_TYPE               TEXT,
+            NOTICE_CODE            TEXT,
+            ATTORNEY_ID            TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_charges (
+            IDNCHARGE              TEXT,
+            IDNPROCEEDING          TEXT,
+            IDNCASE                TEXT,
+            CHARGE                 TEXT,
+            CHARGE_STATUS          TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_rep_assignments (
+            IDNREPASSIGNMENT       TEXT,
+            IDNCASE                TEXT,
+            ATTY_LEVEL             TEXT,
+            ATTY_TYPE              TEXT,
+            PARENT_TABLE           TEXT,
+            PARENT_IDN             TEXT,
+            BASE_CITY_CODE         TEXT,
+            ASSIGNED_DATE          TEXT,
+            E27_DATE               TEXT,
+            E28_DATE               TEXT,
+            PRIME_ATTORNEY         TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_attorneys (
+            ATTORNEY_ID            TEXT PRIMARY KEY,
+            OLD_ATTORNEY_ID        TEXT,
+            BASE_CITY_CODE         TEXT,
+            ACTIVE                 TEXT,
+            SOURCE_FLAG            TEXT,
+            CREATED_ON             TEXT,
+            MODIFIED_ON            TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_motions (
+            IDNMOTION              TEXT,
+            IDNPROCEEDING          TEXT,
+            IDNCASE                TEXT,
+            HEARING_LOC_CODE       TEXT,
+            BASE_CITY_CODE         TEXT,
+            IJ_CODE                TEXT,
+            MOTION_RECD_DATE       TEXT,
+            MOTION_DUE_DATE        TEXT,
+            RESP_DUE_DATE          TEXT,
+            DECISION               TEXT,
+            COMP_DATE              TEXT,
+            FILING_PARTY           TEXT,
+            FILING_METHOD          TEXT,
+            STAY_GRANT             TEXT,
+            JURISDICTION           TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
     # Older canonical DBs may exist from earlier pipeline versions.
     for table_name, columns in {
         "canonical_cases": {
@@ -304,19 +387,20 @@ def _create_lookup_temp_tables(con: duckdb.DuckDBPyConnection) -> None:
             CREATE OR REPLACE TEMP TABLE _decision_lookup AS
             SELECT
                 strCaseType::TEXT AS CASE_TYPE,
+                strDecType::TEXT AS DEC_TYPE,
                 strDecCode::TEXT AS OUTCOME,
                 strDecDescription::TEXT AS OUTCOME_DESCRIPTION,
                 strFinalDisposition::TEXT AS FINAL_DISPOSITION
             FROM rel.tblLookupCourtDecision
             QUALIFY row_number() OVER (
-                PARTITION BY strCaseType, strDecCode
+                PARTITION BY strCaseType, strDecType, strDecCode
                 ORDER BY blnActive DESC NULLS LAST
             ) = 1
         """)
     else:
         con.execute("""
             CREATE OR REPLACE TEMP TABLE _decision_lookup (
-                CASE_TYPE TEXT, OUTCOME TEXT, OUTCOME_DESCRIPTION TEXT, FINAL_DISPOSITION TEXT
+                CASE_TYPE TEXT, DEC_TYPE TEXT, OUTCOME TEXT, OUTCOME_DESCRIPTION TEXT, FINAL_DISPOSITION TEXT
             )
         """)
 
@@ -387,7 +471,10 @@ def _stage_release(con: duckdb.DuckDBPyConnection) -> None:
         FROM rel.B_TblProceeding p
         LEFT JOIN _court_lookup c ON c.COURT = p.HEARING_LOC_CODE
         LEFT JOIN _judge_lookup j ON j.IJ_CODE = p.IJ_CODE
-        LEFT JOIN _decision_lookup d ON d.CASE_TYPE = p.CASE_TYPE AND d.OUTCOME = p.DEC_CODE
+        LEFT JOIN _decision_lookup d
+            ON d.CASE_TYPE = p.CASE_TYPE
+           AND d.DEC_TYPE = p.DEC_TYPE
+           AND d.OUTCOME = p.DEC_CODE
         WHERE p.IDNPROCEEDING IS NOT NULL
     """)
 
@@ -853,6 +940,121 @@ def upsert_release(
             WHERE idn3MemberReferral IS NOT NULL
         """)
 
+    if "tbl_schedule" in rel_tables:
+        con.execute(f"DELETE FROM canonical_schedules WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT INTO canonical_schedules
+                (IDNSCHEDULE, IDNPROCEEDING, IDNCASE, HEARING_LOC_CODE, BASE_CITY_CODE,
+                 IJ_CODE, ADJ_DATE, ADJ_RSN, ADJ_MEDIUM, ADJ_ELAP_DAYS, SCHEDULE_TYPE,
+                 CAL_TYPE, NOTICE_CODE, ATTORNEY_ID, _last_seen_release)
+            SELECT
+                IDNSCHEDULE::TEXT,
+                IDNPROCEEDING::TEXT,
+                IDNCASE::TEXT,
+                HEARING_LOC_CODE::TEXT,
+                BASE_CITY_CODE::TEXT,
+                IJ_CODE::TEXT,
+                ADJ_DATE::TEXT,
+                ADJ_RSN::TEXT,
+                ADJ_MEDIUM::TEXT,
+                ADJ_ELAP_DAYS::TEXT,
+                SCHEDULE_TYPE::TEXT,
+                CAL_TYPE::TEXT,
+                NOTICE_CODE::TEXT,
+                EOIRAttorneyID::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_schedule
+            WHERE IDNSCHEDULE IS NOT NULL
+        """)
+
+    if "B_TblProceedCharges" in rel_tables:
+        con.execute(f"DELETE FROM canonical_charges WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT INTO canonical_charges
+                (IDNCHARGE, IDNPROCEEDING, IDNCASE, CHARGE, CHARGE_STATUS, _last_seen_release)
+            SELECT
+                IDNPRCDCHG::TEXT,
+                IDNPROCEEDING::TEXT,
+                IDNCASE::TEXT,
+                CHARGE::TEXT,
+                CHG_STATUS::TEXT,
+                '{release_tag}'
+            FROM rel.B_TblProceedCharges
+            WHERE IDNPRCDCHG IS NOT NULL
+        """)
+
+    if "tbl_RepsAssigned" in rel_tables:
+        con.execute(f"DELETE FROM canonical_rep_assignments WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT INTO canonical_rep_assignments
+                (IDNREPASSIGNMENT, IDNCASE, ATTY_LEVEL, ATTY_TYPE, PARENT_TABLE,
+                 PARENT_IDN, BASE_CITY_CODE, ASSIGNED_DATE, E27_DATE, E28_DATE,
+                 PRIME_ATTORNEY, _last_seen_release)
+            SELECT
+                IDNREPSASSIGNED::TEXT,
+                IDNCASE::TEXT,
+                STRATTYLEVEL::TEXT,
+                STRATTYTYPE::TEXT,
+                PARENT_TABLE::TEXT,
+                PARENT_IDN::TEXT,
+                BASE_CITY_CODE::TEXT,
+                INS_TA_DATE_ASSIGNED::TEXT,
+                E_27_DATE::TEXT,
+                E_28_DATE::TEXT,
+                BLNPRIMEATTY::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_RepsAssigned
+            WHERE IDNREPSASSIGNED IS NOT NULL
+        """)
+
+    if "tbl_EOIR_Attorney" in rel_tables:
+        con.execute(f"DELETE FROM canonical_attorneys WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT OR REPLACE INTO canonical_attorneys
+                (ATTORNEY_ID, OLD_ATTORNEY_ID, BASE_CITY_CODE, ACTIVE, SOURCE_FLAG,
+                 CREATED_ON, MODIFIED_ON, _last_seen_release)
+            SELECT
+                EOIRAttorneyID::TEXT,
+                OldAttorneyID::TEXT,
+                BaseCityCode::TEXT,
+                blnAttorneyActive::TEXT,
+                Source_Flag::TEXT,
+                datCreatedOn::TEXT,
+                datModifiedOn::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_EOIR_Attorney
+            WHERE EOIRAttorneyID IS NOT NULL
+        """)
+
+    if "tbl_Court_Motions" in rel_tables:
+        con.execute(f"DELETE FROM canonical_motions WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT INTO canonical_motions
+                (IDNMOTION, IDNPROCEEDING, IDNCASE, HEARING_LOC_CODE, BASE_CITY_CODE,
+                 IJ_CODE, MOTION_RECD_DATE, MOTION_DUE_DATE, RESP_DUE_DATE, DECISION,
+                 COMP_DATE, FILING_PARTY, FILING_METHOD, STAY_GRANT, JURISDICTION,
+                 _last_seen_release)
+            SELECT
+                IDNMOTION::TEXT,
+                IDNPROCEEDING::TEXT,
+                IDNCASE::TEXT,
+                HEARING_LOC_CODE::TEXT,
+                BASE_CITY_CODE::TEXT,
+                IJ_CODE::TEXT,
+                MOTION_RECD_DATE::TEXT,
+                DATMOTIONDUE::TEXT,
+                RESP_DUE_DATE::TEXT,
+                DEC::TEXT,
+                COMP_DATE::TEXT,
+                STRFILINGPARTY::TEXT,
+                STRFILINGMETHOD::TEXT,
+                STAY_GRANT::TEXT,
+                JURISDICTION::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_Court_Motions
+            WHERE IDNMOTION IS NOT NULL
+        """)
+
     stats["case_count"] = con.execute("SELECT COUNT(*) FROM canonical_cases").fetchone()[0]
     stats["proceeding_count"] = con.execute("SELECT COUNT(*) FROM canonical_proceedings").fetchone()[0]
     stats["application_count"] = con.execute("SELECT COUNT(*) FROM canonical_applications").fetchone()[0]
@@ -872,6 +1074,141 @@ def upsert_release(
         stats["proceeding_count"],
         stats["application_count"],
     )
+    return stats
+
+
+def load_extended_only(
+    con: duckdb.DuckDBPyConnection,
+    release_tag: str,
+    ingest_db: Path | None = None,
+) -> dict:
+    """Load optional high-volume roadmap tables without re-merging core tables."""
+    _attach_release(con, release_tag, ingest_db=ingest_db)
+    rel_tables = {row[0] for row in con.execute("SHOW TABLES FROM rel").fetchall()}
+    stats = {"release_tag": release_tag}
+
+    if "tbl_schedule" in rel_tables:
+        con.execute(f"DELETE FROM canonical_schedules WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT INTO canonical_schedules
+                (IDNSCHEDULE, IDNPROCEEDING, IDNCASE, HEARING_LOC_CODE, BASE_CITY_CODE,
+                 IJ_CODE, ADJ_DATE, ADJ_RSN, ADJ_MEDIUM, ADJ_ELAP_DAYS, SCHEDULE_TYPE,
+                 CAL_TYPE, NOTICE_CODE, ATTORNEY_ID, _last_seen_release)
+            SELECT
+                IDNSCHEDULE::TEXT,
+                IDNPROCEEDING::TEXT,
+                IDNCASE::TEXT,
+                HEARING_LOC_CODE::TEXT,
+                BASE_CITY_CODE::TEXT,
+                IJ_CODE::TEXT,
+                ADJ_DATE::TEXT,
+                ADJ_RSN::TEXT,
+                ADJ_MEDIUM::TEXT,
+                ADJ_ELAP_DAYS::TEXT,
+                SCHEDULE_TYPE::TEXT,
+                CAL_TYPE::TEXT,
+                NOTICE_CODE::TEXT,
+                EOIRAttorneyID::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_schedule
+            WHERE IDNSCHEDULE IS NOT NULL
+        """)
+        stats["schedule_count"] = con.execute("SELECT COUNT(*) FROM canonical_schedules").fetchone()[0]
+
+    if "B_TblProceedCharges" in rel_tables:
+        con.execute(f"DELETE FROM canonical_charges WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT INTO canonical_charges
+                (IDNCHARGE, IDNPROCEEDING, IDNCASE, CHARGE, CHARGE_STATUS, _last_seen_release)
+            SELECT
+                IDNPRCDCHG::TEXT,
+                IDNPROCEEDING::TEXT,
+                IDNCASE::TEXT,
+                CHARGE::TEXT,
+                CHG_STATUS::TEXT,
+                '{release_tag}'
+            FROM rel.B_TblProceedCharges
+            WHERE IDNPRCDCHG IS NOT NULL
+        """)
+        stats["charge_count"] = con.execute("SELECT COUNT(*) FROM canonical_charges").fetchone()[0]
+
+    if "tbl_RepsAssigned" in rel_tables:
+        con.execute(f"DELETE FROM canonical_rep_assignments WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT INTO canonical_rep_assignments
+                (IDNREPASSIGNMENT, IDNCASE, ATTY_LEVEL, ATTY_TYPE, PARENT_TABLE,
+                 PARENT_IDN, BASE_CITY_CODE, ASSIGNED_DATE, E27_DATE, E28_DATE,
+                 PRIME_ATTORNEY, _last_seen_release)
+            SELECT
+                IDNREPSASSIGNED::TEXT,
+                IDNCASE::TEXT,
+                STRATTYLEVEL::TEXT,
+                STRATTYTYPE::TEXT,
+                PARENT_TABLE::TEXT,
+                PARENT_IDN::TEXT,
+                BASE_CITY_CODE::TEXT,
+                INS_TA_DATE_ASSIGNED::TEXT,
+                E_27_DATE::TEXT,
+                E_28_DATE::TEXT,
+                BLNPRIMEATTY::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_RepsAssigned
+            WHERE IDNREPSASSIGNED IS NOT NULL
+        """)
+        stats["rep_assignment_count"] = con.execute("SELECT COUNT(*) FROM canonical_rep_assignments").fetchone()[0]
+
+    if "tbl_EOIR_Attorney" in rel_tables:
+        con.execute(f"DELETE FROM canonical_attorneys WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT OR REPLACE INTO canonical_attorneys
+                (ATTORNEY_ID, OLD_ATTORNEY_ID, BASE_CITY_CODE, ACTIVE, SOURCE_FLAG,
+                 CREATED_ON, MODIFIED_ON, _last_seen_release)
+            SELECT
+                EOIRAttorneyID::TEXT,
+                OldAttorneyID::TEXT,
+                BaseCityCode::TEXT,
+                blnAttorneyActive::TEXT,
+                Source_Flag::TEXT,
+                datCreatedOn::TEXT,
+                datModifiedOn::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_EOIR_Attorney
+            WHERE EOIRAttorneyID IS NOT NULL
+        """)
+        stats["attorney_count"] = con.execute("SELECT COUNT(*) FROM canonical_attorneys").fetchone()[0]
+
+    if "tbl_Court_Motions" in rel_tables:
+        con.execute(f"DELETE FROM canonical_motions WHERE _last_seen_release = '{release_tag}'")
+        con.execute(f"""
+            INSERT INTO canonical_motions
+                (IDNMOTION, IDNPROCEEDING, IDNCASE, HEARING_LOC_CODE, BASE_CITY_CODE,
+                 IJ_CODE, MOTION_RECD_DATE, MOTION_DUE_DATE, RESP_DUE_DATE, DECISION,
+                 COMP_DATE, FILING_PARTY, FILING_METHOD, STAY_GRANT, JURISDICTION,
+                 _last_seen_release)
+            SELECT
+                IDNMOTION::TEXT,
+                IDNPROCEEDING::TEXT,
+                IDNCASE::TEXT,
+                HEARING_LOC_CODE::TEXT,
+                BASE_CITY_CODE::TEXT,
+                IJ_CODE::TEXT,
+                MOTION_RECD_DATE::TEXT,
+                DATMOTIONDUE::TEXT,
+                RESP_DUE_DATE::TEXT,
+                DEC::TEXT,
+                COMP_DATE::TEXT,
+                STRFILINGPARTY::TEXT,
+                STRFILINGMETHOD::TEXT,
+                STAY_GRANT::TEXT,
+                JURISDICTION::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_Court_Motions
+            WHERE IDNMOTION IS NOT NULL
+        """)
+        stats["motion_count"] = con.execute("SELECT COUNT(*) FROM canonical_motions").fetchone()[0]
+
+    con.execute("CHECKPOINT")
+    log.info("Extended canonical load complete: %s", stats)
     return stats
 
 
@@ -895,6 +1232,11 @@ if __name__ == "__main__":
         default=None,
         help="Optional canonical DuckDB output path. Defaults to silver/canonical.duckdb.",
     )
+    parser.add_argument(
+        "--extended-only",
+        action="store_true",
+        help="Load optional roadmap side tables without re-merging core case/proceeding/application tables.",
+    )
     args = parser.parse_args()
 
     if not args.release:
@@ -905,6 +1247,9 @@ if __name__ == "__main__":
     con = get_canonical_con(canonical_db)
     init_canonical(con)
     ingest_db = Path(args.ingest_db) if args.ingest_db else None
-    stats = upsert_release(con, args.release, ingest_db=ingest_db)
+    if args.extended_only:
+        stats = load_extended_only(con, args.release, ingest_db=ingest_db)
+    else:
+        stats = upsert_release(con, args.release, ingest_db=ingest_db)
     con.close()
     print(f"Done: {stats}")

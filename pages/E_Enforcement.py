@@ -154,14 +154,18 @@ with tab_ia:
             if ia_court_df is None or ia_court_df.empty:
                 st.info("Court-level in absentia data not available.")
             else:
-                ia_c = ia_court_df.sort_values("in_absentia_rate", ascending=True)
+                ia_c = ia_court_df.sort_values("in_absentia_rate", ascending=False)
                 fig3 = px.bar(ia_c, x="in_absentia_rate", y="court_city", orientation="h",
                     color="in_absentia_rate", color_continuous_scale="Reds",
                     text=ia_c["in_absentia_rate"].map("{:.1%}".format),
                     labels={"in_absentia_rate": "IA Rate", "court_city": "Court"})
                 fig3.update_coloraxes(showscale=False)
                 fig3.update_traces(textposition="outside")
-                fig3.update_layout(yaxis=dict(autorange="reversed"),
+                fig3.update_layout(yaxis=dict(
+                    categoryorder="array",
+                    categoryarray=ia_c["court_city"].tolist(),
+                    autorange="reversed",
+                ),
                     height=max(380, len(ia_c)*25 + 80), margin=dict(t=20, b=40))
                 st.plotly_chart(fig3, width="stretch")
         csv_download_button(ia_time_df, "relief_docket_in_absentia.csv", key="ia_dl")
@@ -179,9 +183,13 @@ with tab_det:
     if det_time_df is None or det_time_df.empty:
         no_data_banner()
     else:
-        det_s = det_time_df.sort_values("fiscal_year")
+        det_s_all = det_time_df.sort_values("fiscal_year").copy()
+        det_s = det_s_all[det_s_all["book_ins"].fillna(0) >= 100].copy()
+        if det_s.empty:
+            det_s = det_s_all.copy()
         ld = det_s.iloc[-1]
         pd_det = det_s.iloc[-2] if len(det_s) > 1 else ld
+        avg_los = ld.get("avg_length_of_stay_days")
 
         dc1, dc2, dc3 = st.columns(3)
         dc1.metric(f"ADP (FY{int(ld['fiscal_year'])})",
@@ -189,8 +197,12 @@ with tab_det:
                    delta=f"{int(ld['avg_daily_pop'] - pd_det['avg_daily_pop']):+,}",
                    delta_color="inverse")
         dc2.metric("Book-ins", format_num(ld["book_ins"]))
-        if "avg_length_of_stay_days" in ld:
-            dc3.metric("Avg. Length of Stay", f"{ld['avg_length_of_stay_days']:.1f} days")
+        if pd.notna(avg_los):
+            dc3.metric("Avg. Length of Stay", f"{avg_los:.1f} days")
+        else:
+            dc3.metric("Avg. Length of Stay", "Not available")
+        if len(det_s) != len(det_s_all):
+            st.caption("Tiny partial-year detention buckets are excluded from headline metrics and charts.")
 
         dt1, dt2, dt3 = st.tabs(["👥 Population & Beds", "📋 Book-ins & Length of Stay",
                                    "🏢 Facility Types"])
@@ -223,8 +235,9 @@ with tab_det:
                 name="Annual Book-ins", marker_color="#8e44ad", opacity=0.8,
                 hovertemplate="FY%{x} — %{y:,} book-ins<extra></extra>"))
             if "avg_length_of_stay_days" in det_s.columns:
+                los_s = det_s.dropna(subset=["avg_length_of_stay_days"])
                 fig2.add_trace(go.Scatter(
-                    x=det_s["fiscal_year"], y=det_s["avg_length_of_stay_days"],
+                    x=los_s["fiscal_year"], y=los_s["avg_length_of_stay_days"],
                     name="Avg LOS (days, right)", mode="lines+markers",
                     line=dict(color="#e67e22", width=2), yaxis="y2",
                     hovertemplate="FY%{x} — %{y:.1f} days avg<extra></extra>"))
@@ -242,14 +255,19 @@ with tab_det:
             if det_fac_df is None or det_fac_df.empty:
                 st.info("Facility type data not available.")
             else:
-                if "facility_type" in det_fac_df.columns and "pct_of_pop" in det_fac_df.columns:
-                    fig3 = px.pie(det_fac_df, names="facility_type", values="pct_of_pop",
-                        title="Detention Population by Facility Type",
+                display_fac = det_fac_df.dropna(axis=1, how="all").copy()
+                if "facility_type" in display_fac.columns and "pct_of_pop" in display_fac.columns:
+                    fig3 = px.pie(display_fac, names="facility_type", values="pct_of_pop",
+                        title="EOIR Custody Records by Category",
                         color_discrete_sequence=px.colors.qualitative.Set2, hole=0.4)
                     fig3.update_layout(height=380, margin=dict(t=40, b=20))
                     st.plotly_chart(fig3, width="stretch")
                 from utils import clean_dataframe_columns
-                st.dataframe(clean_dataframe_columns(det_fac_df), width="stretch", height=350, hide_index=True)
+                st.caption(
+                    "This table uses EOIR custody categories from the court data. "
+                    "Average length of stay and daily cost are not exposed in this EOIR extract."
+                )
+                st.dataframe(clean_dataframe_columns(display_fac), width="stretch", height=350, hide_index=True)
 
         csv_download_button(det_time_df, "relief_docket_detention.csv", key="det_dl")
 
@@ -367,9 +385,14 @@ with tab_bond:
     if bond_df is None or bond_df.empty:
         no_data_banner()
     else:
-        bond_sorted = bond_df.sort_values("fiscal_year")
+        bond_all = bond_df.sort_values("fiscal_year").copy()
+        bond_sorted = bond_all[bond_all["total_hearings"].fillna(0) >= 100].copy()
+        if bond_sorted.empty:
+            bond_sorted = bond_all.copy()
         lb = bond_sorted.iloc[-1]
         pb = bond_sorted.iloc[-2] if len(bond_sorted) > 1 else lb
+        median_bond = lb.get("median_bond")
+        prev_median_bond = pb.get("median_bond")
 
         bc1, bc2, bc3, bc4 = st.columns(4)
         bc1.metric(f"Bond Hearings (FY{int(lb['fiscal_year'])})",
@@ -378,19 +401,27 @@ with tab_bond:
                    delta_color="off")
         bc2.metric("Grant Rate", format_pct(lb["grant_rate"]),
                    delta=f"{(lb['grant_rate'] - pb['grant_rate'])*100:+.1f}pp")
-        bc3.metric("Median Bond Amount",
-                   f"${lb['median_bond']:,.0f}",
-                   delta=f"${lb['median_bond'] - pb['median_bond']:+,.0f}",
-                   delta_color="inverse")
+        if pd.notna(median_bond):
+            bond_delta = None
+            if pd.notna(prev_median_bond):
+                bond_delta = f"${median_bond - prev_median_bond:+,.0f}"
+            bc3.metric("Median Bond Amount",
+                       f"${median_bond:,.0f}",
+                       delta=bond_delta,
+                       delta_color="inverse")
+        else:
+            bc3.metric("Median Bond Amount", "Not available")
         if "detention_rate_post" in lb:
             bc4.metric("Detention Rate Post-Hearing", format_pct(lb["detention_rate_post"]))
+        if len(bond_sorted) != len(bond_all):
+            st.caption("Tiny partial-year bond buckets are excluded from headline metrics and charts.")
 
         bond_yr = st.slider("Fiscal year range",
-            min_value=int(bond_df["fiscal_year"].min()),
-            max_value=int(bond_df["fiscal_year"].max()),
-            value=(2005, int(bond_df["fiscal_year"].max())),
+            min_value=int(bond_sorted["fiscal_year"].min()),
+            max_value=int(bond_sorted["fiscal_year"].max()),
+            value=(2005, int(bond_sorted["fiscal_year"].max())),
             key="bond_yr_range")
-        bond_f = bond_df[bond_df["fiscal_year"].between(bond_yr[0], bond_yr[1])].copy()
+        bond_f = bond_sorted[bond_sorted["fiscal_year"].between(bond_yr[0], bond_yr[1])].copy()
         bond_f = bond_f.sort_values("fiscal_year")
 
         # Chart 1: grant rate trend
@@ -407,9 +438,10 @@ with tab_bond:
         fig1 = _add_admin_bands(fig1)
 
         # Chart 2: median bond
+        bond_amt_f = bond_f.dropna(subset=["median_bond"])
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(
-            x=bond_f["fiscal_year"], y=bond_f["median_bond"],
+            x=bond_amt_f["fiscal_year"], y=bond_amt_f["median_bond"],
             mode="lines+markers", name="Median Bond Amount",
             line=dict(color="#c0392b", width=2.5),
             fill="tozeroy", fillcolor="rgba(192,57,43,0.12)",

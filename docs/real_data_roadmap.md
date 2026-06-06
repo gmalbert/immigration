@@ -16,7 +16,7 @@ Current status: implemented for EOIR-supported measures. A few measures still ha
 | Detention | `data/detention_timeline.parquet`, `data/detention_by_facility.parquet` | `tbl_CustodyHistory`, `A_TblCase`, `B_TblProceeding` | Real EOIR custody-history metrics. Facility file falls back to EOIR custody categories because facility type is not populated in this release. |
 | BIA and federal appeals | `data/bia_timeline.parquet`, `data/circuit_appeals.parquet` | `tblAppeal`, `tblAppealFedCourts`, `tblThreeMbrReferrals` | Real EOIR appeal records. Federal appeal output is aggregated as a single EOIR federal-court category because circuit identity is not exposed in the table. |
 | Unaccompanied children / juvenile history | `data/uac_metrics.parquet`, `data/uac_origin.parquet` | `tbl_JuvenileHistory`, `A_TblCase`, `B_TblProceeding`, `E_TblApplication` | Real EOIR juvenile-history metrics and nationality origin counts. |
-| Case age and backlog age | `data/case_age_timeline.parquet`, `data/case_age_by_court.parquet`, `data/backlog_age_dist.parquet` | `A_TblCase`, `B_TblProceeding` | Real EOIR proceeding-age and pending-age aggregates. Historical backlog timeline remains a current-release snapshot unless monthly archives are added. |
+| Case age and backlog age | `data/case_age_timeline.parquet`, `data/case_age_by_court.parquet`, `data/backlog_timeline.parquet`, `data/backlog_age_dist.parquet` | `A_TblCase`, `B_TblProceeding` | Real EOIR proceeding-age, derived annual backlog, and pending-age aggregates. The backlog timeline is reconstructed from current-release start and decision dates, not archived monthly snapshots. |
 | Removal orders | `data/removal_orders.parquet`, `data/removal_by_nationality.parquet` | `B_TblProceeding`, `tblLookupCourtDecision`, `tblLookupNationality` | Real EOIR proceeding decision aggregates by year and nationality. |
 
 ## Validation Counts
@@ -42,7 +42,7 @@ These are not fake data, but they are limits of what the EOIR CASE release can p
 - True ICE average daily detention population and funded bed trends require ICE or DHS detention datasets.
 - Facility ownership, facility cost, and precise facility names are not populated in the current EOIR CASE fields used by the app.
 - Federal court appeal records in EOIR do not expose the circuit, so the app uses a single federal-court category rather than circuit-by-circuit rates.
-- Historical backlog trends require monthly EOIR archives or EOIR yearbook aggregates. The current file shows the backlog state derivable from the June 2026 release.
+- Official month-by-month historical backlog trends require monthly EOIR archives or EOIR yearbook aggregates. The current file reconstructs annual pending inventory from the June 2026 release's proceeding start and decision dates.
 - Removal/departure categories are based on EOIR immigration-court decision descriptions and do not include expedited removals handled outside immigration court.
 
 ## Rebuild Commands
