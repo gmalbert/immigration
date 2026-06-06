@@ -179,9 +179,13 @@ with tab_det:
     if det_time_df is None or det_time_df.empty:
         no_data_banner()
     else:
-        det_s = det_time_df.sort_values("fiscal_year")
+        det_s_all = det_time_df.sort_values("fiscal_year").copy()
+        det_s = det_s_all[det_s_all["book_ins"].fillna(0) >= 100].copy()
+        if det_s.empty:
+            det_s = det_s_all.copy()
         ld = det_s.iloc[-1]
         pd_det = det_s.iloc[-2] if len(det_s) > 1 else ld
+        avg_los = ld.get("avg_length_of_stay_days")
 
         dc1, dc2, dc3 = st.columns(3)
         dc1.metric(f"ADP (FY{int(ld['fiscal_year'])})",
@@ -189,8 +193,12 @@ with tab_det:
                    delta=f"{int(ld['avg_daily_pop'] - pd_det['avg_daily_pop']):+,}",
                    delta_color="inverse")
         dc2.metric("Book-ins", format_num(ld["book_ins"]))
-        if "avg_length_of_stay_days" in ld:
-            dc3.metric("Avg. Length of Stay", f"{ld['avg_length_of_stay_days']:.1f} days")
+        if pd.notna(avg_los):
+            dc3.metric("Avg. Length of Stay", f"{avg_los:.1f} days")
+        else:
+            dc3.metric("Avg. Length of Stay", "Not available")
+        if len(det_s) != len(det_s_all):
+            st.caption("Tiny partial-year detention buckets are excluded from headline metrics and charts.")
 
         dt1, dt2, dt3 = st.tabs(["👥 Population & Beds", "📋 Book-ins & Length of Stay",
                                    "🏢 Facility Types"])
@@ -223,8 +231,9 @@ with tab_det:
                 name="Annual Book-ins", marker_color="#8e44ad", opacity=0.8,
                 hovertemplate="FY%{x} — %{y:,} book-ins<extra></extra>"))
             if "avg_length_of_stay_days" in det_s.columns:
+                los_s = det_s.dropna(subset=["avg_length_of_stay_days"])
                 fig2.add_trace(go.Scatter(
-                    x=det_s["fiscal_year"], y=det_s["avg_length_of_stay_days"],
+                    x=los_s["fiscal_year"], y=los_s["avg_length_of_stay_days"],
                     name="Avg LOS (days, right)", mode="lines+markers",
                     line=dict(color="#e67e22", width=2), yaxis="y2",
                     hovertemplate="FY%{x} — %{y:.1f} days avg<extra></extra>"))

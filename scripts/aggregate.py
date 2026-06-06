@@ -737,6 +737,7 @@ def build_detention_outputs(con: duckdb.DuckDBPyConnection) -> None:
         FROM base
         WHERE fiscal_year BETWEEN 1990 AND 2027
         GROUP BY fiscal_year
+        HAVING book_ins >= 100
         ORDER BY fiscal_year
     """).df()
     save(timeline, "detention_timeline")
