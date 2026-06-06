@@ -2,15 +2,13 @@
 pages/A_Policy_Appeals.py — Policy Shift Tracker + Appeals Tracker
 
 Tab 1: Policy Shifts — admin closure, terminations, in absentia across administrations
-Tab 2: Appeals — BIA volume/outcomes + federal circuit court petition rates
+Tab 2: Appeals — BIA volume/outcomes + federal petition trend
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import streamlit as st
-import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 
 from utils import add_sidebar, no_data_banner, format_num, format_pct, csv_download_button
 from utils.data_loader import (
@@ -208,11 +206,12 @@ with tab_appeals:
         col3.metric("Non-Affirmance Rate", format_pct(reversal_rate),
                     delta=f"{(reversal_rate - prev_rev_rate)*100:+.1f}pp", delta_color="off")
         if circ_df is not None and not circ_df.empty:
-            fed = circ_df[circ_df["circuit"] == "FED"]["reversal_rate"].values
-            col4.metric("Federal Appeal Remand Rate",
-                        format_pct(fed[0] if len(fed) else circ_df["reversal_rate"].mean()))
+            fed_df = circ_df.dropna(subset=["fiscal_year"]).sort_values("fiscal_year")
+            fed_latest = fed_df.iloc[-1] if not fed_df.empty else None
+            col4.metric("Federal Remand Rate",
+                        format_pct(fed_latest["reversal_rate"] if fed_latest is not None else circ_df["reversal_rate"].mean()))
         else:
-            col4.metric("Circuit Data", "—")
+            col4.metric("Federal Data", "—")
 
         atab1, atab2, atab3 = st.tabs(["📈 BIA Volume & Backlog",
                                         "📊 BIA Outcome Breakdown",
@@ -248,10 +247,10 @@ with tab_appeals:
         with atab2:
             fig2 = go.Figure()
             for y_col, name, color in [
-                ("dismissed", "Dismissed (IJ affirmed)", C_DISMISS),
+                ("dismissed", "Dismissed / Denied / Affirmed", C_DISMISS),
                 ("remanded",  "Remanded to IJ",          C_REMAND),
-                ("sustained", "Sustained (reversed)",    C_SUSTAIN),
-                ("dhs_appeals","DHS Appeals of Grants",  C_DHS),
+                ("sustained", "Sustained / Granted",     C_SUSTAIN),
+                ("dhs_appeals","DHS / INS Appeals",      C_DHS),
             ]:
                 fig2.add_trace(go.Bar(x=df["fiscal_year"], y=df[y_col],
                     name=name, marker_color=color,
@@ -287,55 +286,68 @@ for review in the federal circuit courts after 2003.
 
         with atab3:
             if circ_df is None or circ_df.empty:
-                st.info("Circuit court data not available.")
+                st.info("Federal court appeal data not available.")
             else:
-                circ_sorted = circ_df.sort_values("petitions_filed", ascending=False)
-                colors_px = px.colors.qualitative.Plotly
+                fed_df = circ_df.dropna(subset=["fiscal_year"]).sort_values("fiscal_year").copy()
+                fed_df = fed_df[(fed_df["fiscal_year"] >= app_yr[0]) & (fed_df["fiscal_year"] <= app_yr[1])]
+
+                st.caption(
+                    "EOIR exposes federal petition-for-review records and coded federal remands, "
+                    "but this table does not expose circuit identity. This is an annual federal trend, "
+                    "not a circuit-by-circuit comparison."
+                )
 
                 fig4 = go.Figure()
-                for i, (_, row) in enumerate(circ_sorted.iterrows()):
-                    fig4.add_trace(go.Scatter(
-                        x=[row["petitions_filed"]], y=[row["reversal_rate"]],
-                        mode="markers+text",
-                        name=row.get("circuit_name", row["circuit"]),
-                        text=[row["circuit"]],
-                        textposition="top center",
-                        marker=dict(
-                            size=max(12, row["petitions_filed"] / circ_sorted["petitions_filed"].max() * 60),
-                            color=colors_px[i % len(colors_px)],
-                            opacity=0.8,
-                        ),
-                        hovertemplate=(
-                            f"<b>{row.get('circuit_name', row['circuit'])}</b><br>"
-                            "Petitions: %{x:,}<br>Reversal rate: %{y:.1%}<extra></extra>"
-                        ),
-                    ))
+                fig4.add_trace(go.Bar(
+                    x=fed_df["fiscal_year"], y=fed_df["petitions_filed"],
+                    name="Petitions Filed",
+                    marker_color=C_RECEIPTS,
+                    hovertemplate="FY%{x} — Petitions: %{y:,.0f}<extra></extra>",
+                ))
+                fig4.add_trace(go.Scatter(
+                    x=fed_df["fiscal_year"], y=fed_df["granted_remanded"],
+                    mode="lines+markers",
+                    name="Recorded Remands",
+                    line=dict(color=C_REMAND, width=2.5),
+                    yaxis="y2",
+                    hovertemplate="FY%{x} — Remands: %{y:,.0f}<extra></extra>",
+                ))
                 fig4.update_layout(
-                    xaxis=dict(title="Petitions Filed", tickformat=","),
-                    yaxis=dict(title="Reversal Rate", tickformat=".0%"),
-                    showlegend=False,
+                    yaxis=dict(title="Petitions Filed", tickformat=","),
+                    yaxis2=dict(title="Recorded Remands", tickformat=",",
+                                overlaying="y", side="right", showgrid=False),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode="x unified",
                     height=420,
-                    margin=dict(t=20, b=40),
+                    margin=dict(t=60, b=40),
                 )
+                fig4 = _add_admin_bands(fig4)
                 st.plotly_chart(fig4, width="stretch")
 
-                fig5 = px.bar(
-                    circ_sorted, x="reversal_rate", y="circuit",
-                    orientation="h",
-                    color="reversal_rate",
-                    color_continuous_scale=["#c0392b", "#f1c40f", "#1e8a50"],
-                    text=circ_sorted["reversal_rate"].map("{:.1%}".format),
-                    labels={"reversal_rate": "Remand/Grant Rate", "circuit": "EOIR Category"},
+                fig5 = go.Figure()
+                fig5.add_trace(go.Scatter(
+                    x=fed_df["fiscal_year"], y=fed_df["reversal_rate"],
+                    mode="lines+markers",
+                    name="Recorded Federal Remand Rate",
+                    line=dict(color=C_SUSTAIN, width=2.5),
+                    fill="tozeroy",
+                    fillcolor="rgba(30,138,80,0.12)",
+                    hovertemplate="FY%{x} — Remand rate: %{y:.1%}<extra></extra>",
+                ))
+                fig5.update_layout(
+                    yaxis=dict(title="Share of Petitions", tickformat=".1%"),
+                    margin=dict(t=30, b=40),
+                    height=300,
                 )
-                fig5.update_coloraxes(showscale=False)
-                fig5.update_traces(textposition="outside")
-                fig5.update_layout(yaxis=dict(autorange="reversed"),
-                                   margin=dict(t=20, b=40), height=380)
+                fig5 = _add_admin_bands(fig5)
                 st.plotly_chart(fig5, width="stretch")
 
-                tbl = circ_sorted.copy()
+                tbl = fed_df.copy()
                 tbl["reversal_rate"] = tbl["reversal_rate"].map("{:.1%}".format)
                 tbl["petitions_filed"] = tbl["petitions_filed"].map("{:,}".format)
+                tbl["granted_remanded"] = tbl["granted_remanded"].map("{:,}".format)
+                if "median_days" in tbl.columns:
+                    tbl["median_days"] = tbl["median_days"].round(0).astype("Int64").astype(str)
                 from utils import clean_dataframe_columns
                 st.dataframe(clean_dataframe_columns(tbl), width="stretch", hide_index=True)
 

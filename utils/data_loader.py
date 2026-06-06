@@ -369,7 +369,7 @@ def load_bia_timeline() -> Optional[pd.DataFrame]:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_circuit_appeals() -> Optional[pd.DataFrame]:
-    """Petitions for review filed in each circuit court and reversal rates."""
+    """Federal petition-for-review trend from EOIR appeal records."""
     path = _DATA / "circuit_appeals.parquet"
     if not path.exists():
         return None

@@ -871,8 +871,7 @@ def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 END AS fiscal_year,
                 IDNAPPEAL,
                 FILED_BY,
-                BIA_DECISION,
-                BIA_DECISION_TYPE,
+                UPPER(TRIM(COALESCE(BIA_DECISION, ''))) AS DECISION_CODE,
                 BIA_DECISION_DATE
             FROM canonical_appeals
         )
@@ -880,10 +879,10 @@ def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
             fiscal_year,
             COUNT(DISTINCT IDNAPPEAL) AS receipts,
             COUNT(DISTINCT CASE WHEN BIA_DECISION_DATE IS NOT NULL AND BIA_DECISION_DATE != '' THEN IDNAPPEAL END) AS completions,
-            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%DISMISS%' OR UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%AFFIRM%' THEN IDNAPPEAL END) AS dismissed,
-            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%SUSTAIN%' THEN IDNAPPEAL END) AS sustained,
-            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%REMAND%' THEN IDNAPPEAL END) AS remanded,
-            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(FILED_BY, '')) LIKE '%DHS%' OR UPPER(COALESCE(FILED_BY, '')) LIKE '%INS%' THEN IDNAPPEAL END) AS dhs_appeals,
+            COUNT(DISTINCT CASE WHEN DECISION_CODE IN ('DIS', 'D30', 'DVD', 'DEN', 'SAF', 'SAV') THEN IDNAPPEAL END) AS dismissed,
+            COUNT(DISTINCT CASE WHEN DECISION_CODE IN ('SUS', 'SUD', 'SDG', 'GRN') THEN IDNAPPEAL END) AS sustained,
+            COUNT(DISTINCT CASE WHEN DECISION_CODE = 'REM' THEN IDNAPPEAL END) AS remanded,
+            COUNT(DISTINCT CASE WHEN UPPER(TRIM(COALESCE(FILED_BY, ''))) IN ('I', 'D') THEN IDNAPPEAL END) AS dhs_appeals,
             COUNT(DISTINCT CASE WHEN BIA_DECISION_DATE IS NULL OR BIA_DECISION_DATE = '' THEN IDNAPPEAL END) AS pending,
             NULL::TEXT AS admin
         FROM base
@@ -894,19 +893,34 @@ def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
     save(bia, "bia_timeline")
 
     fed = con.execute("""
+        WITH base AS (
+            SELECT
+                CASE
+                    WHEN TRY_CAST(REQUESTED_BY_OIL_DATE AS TIMESTAMP) IS NULL THEN NULL
+                    WHEN MONTH(TRY_CAST(REQUESTED_BY_OIL_DATE AS TIMESTAMP)) >= 10
+                        THEN YEAR(TRY_CAST(REQUESTED_BY_OIL_DATE AS TIMESTAMP)) + 1
+                    ELSE YEAR(TRY_CAST(REQUESTED_BY_OIL_DATE AS TIMESTAMP))
+                END AS fiscal_year,
+                f.IDNFEDAPPEAL,
+                UPPER(TRIM(COALESCE(f.FED_DECISION, ''))) AS FED_DECISION,
+                TRY_CAST(a.BIA_DECISION_DATE AS TIMESTAMP) AS BIA_DECISION_TS,
+                TRY_CAST(f.REQUESTED_BY_OIL_DATE AS TIMESTAMP) AS REQUESTED_TS
+            FROM canonical_fed_appeals f
+            LEFT JOIN canonical_appeals a ON a.IDNAPPEAL = f.IDNAPPEAL
+            WHERE f.REQUESTED_BY_OIL_DATE IS NOT NULL
+              AND f.REQUESTED_BY_OIL_DATE != ''
+        )
         SELECT
-            'FED' AS circuit,
-            'Federal Courts' AS circuit_name,
-            'EOIR federal appeal records' AS key_states,
-            COUNT(DISTINCT f.IDNFEDAPPEAL) AS petitions_filed,
-            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(f.FED_DECISION, '')) LIKE '%REMAND%' OR UPPER(COALESCE(f.FED_DECISION, '')) LIKE '%GRANT%' THEN f.IDNFEDAPPEAL END) AS granted_remanded,
+            fiscal_year,
+            COUNT(DISTINCT IDNFEDAPPEAL) AS petitions_filed,
+            COUNT(DISTINCT CASE WHEN FED_DECISION = 'REM' THEN IDNFEDAPPEAL END) AS granted_remanded,
             ROUND(granted_remanded::DOUBLE / NULLIF(petitions_filed, 0), 4) AS reversal_rate,
-            MEDIAN(DATE_DIFF('day', TRY_CAST(a.BIA_DECISION_DATE AS TIMESTAMP), TRY_CAST(f.REQUESTED_BY_OIL_DATE AS TIMESTAMP))) AS median_days,
-            'EOIR does not expose circuit identity in this table' AS notable_case
-        FROM canonical_fed_appeals f
-        LEFT JOIN canonical_appeals a ON a.IDNAPPEAL = f.IDNAPPEAL
-        WHERE f.REQUESTED_BY_OIL_DATE IS NOT NULL
-          AND f.REQUESTED_BY_OIL_DATE != ''
+            MEDIAN(DATE_DIFF('day', BIA_DECISION_TS, REQUESTED_TS)) AS median_days,
+            'EOIR federal appeal records do not expose circuit identity' AS note
+        FROM base
+        WHERE fiscal_year BETWEEN 1990 AND 2027
+        GROUP BY fiscal_year
+        ORDER BY fiscal_year
     """).df()
     save(fed, "circuit_appeals")
 
