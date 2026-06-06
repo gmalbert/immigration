@@ -255,14 +255,19 @@ with tab_det:
             if det_fac_df is None or det_fac_df.empty:
                 st.info("Facility type data not available.")
             else:
-                if "facility_type" in det_fac_df.columns and "pct_of_pop" in det_fac_df.columns:
-                    fig3 = px.pie(det_fac_df, names="facility_type", values="pct_of_pop",
-                        title="Detention Population by Facility Type",
+                display_fac = det_fac_df.dropna(axis=1, how="all").copy()
+                if "facility_type" in display_fac.columns and "pct_of_pop" in display_fac.columns:
+                    fig3 = px.pie(display_fac, names="facility_type", values="pct_of_pop",
+                        title="EOIR Custody Records by Category",
                         color_discrete_sequence=px.colors.qualitative.Set2, hole=0.4)
                     fig3.update_layout(height=380, margin=dict(t=40, b=20))
                     st.plotly_chart(fig3, width="stretch")
                 from utils import clean_dataframe_columns
-                st.dataframe(clean_dataframe_columns(det_fac_df), width="stretch", height=350, hide_index=True)
+                st.caption(
+                    "This table uses EOIR custody categories from the court data. "
+                    "Average length of stay and daily cost are not exposed in this EOIR extract."
+                )
+                st.dataframe(clean_dataframe_columns(display_fac), width="stretch", height=350, hide_index=True)
 
         csv_download_button(det_time_df, "relief_docket_detention.csv", key="det_dl")
 

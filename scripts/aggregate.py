@@ -780,9 +780,7 @@ def build_detention_outputs(con: duckdb.DuckDBPyConnection) -> None:
         )
         SELECT
             facility_type,
-            ROUND(cases::DOUBLE / NULLIF(denominator, 0), 4) AS pct_of_pop,
-            NULL::DOUBLE AS avg_alos_days,
-            NULL::DOUBLE AS avg_daily_cost_usd
+            ROUND(cases::DOUBLE / NULLIF(denominator, 0), 4) AS pct_of_pop
         FROM selected
         ORDER BY pct_of_pop DESC
     """).df()
