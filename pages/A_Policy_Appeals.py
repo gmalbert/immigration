@@ -365,7 +365,9 @@ for review in the federal circuit courts after 2003.
                 fig5 = _add_admin_bands(fig5)
                 st.plotly_chart(fig5, width="stretch")
 
-                tbl = fed_df.copy()
+                tbl = fed_df.drop(columns=["note"], errors="ignore").sort_values(
+                    "fiscal_year", ascending=False
+                ).copy()
                 tbl["reversal_rate"] = tbl["reversal_rate"].map("{:.1%}".format)
                 tbl["petitions_filed"] = tbl["petitions_filed"].map("{:,}".format)
                 tbl["granted_remanded"] = tbl["granted_remanded"].map("{:,}".format)
@@ -373,7 +375,7 @@ for review in the federal circuit courts after 2003.
                     tbl["median_days"] = tbl["median_days"].round(0).astype("Int64").astype(str)
                 from utils import clean_dataframe_columns
                 st.dataframe(clean_dataframe_columns(tbl), width="stretch", hide_index=True)
-                csv_download_button(circ_df, "relief_docket_circuit_appeals.csv",
+                csv_download_button(tbl, "relief_docket_circuit_appeals.csv",
                                     key="app_circ_dl")
 
 add_gavel_glimpse_footer()

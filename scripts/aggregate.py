@@ -913,8 +913,7 @@ def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT IDNFEDAPPEAL) AS petitions_filed,
             COUNT(DISTINCT CASE WHEN FED_DECISION = 'REM' THEN IDNFEDAPPEAL END) AS granted_remanded,
             ROUND(granted_remanded::DOUBLE / NULLIF(petitions_filed, 0), 4) AS reversal_rate,
-            MEDIAN(DATE_DIFF('day', BIA_DECISION_TS, REQUESTED_TS)) AS median_days,
-            'EOIR federal appeal records do not expose circuit identity' AS note
+            MEDIAN(DATE_DIFF('day', BIA_DECISION_TS, REQUESTED_TS)) AS median_days
         FROM base
         WHERE fiscal_year BETWEEN 1990 AND 2027
         GROUP BY fiscal_year
