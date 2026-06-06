@@ -96,7 +96,7 @@ The app should not overclaim what EOIR can prove:
 
 - EOIR federal appeal records do not expose circuit identity, so the app aggregates them as one federal-court category.
 - EOIR custody history supports case-level custody metrics, but true ICE average daily population, bed counts, facility costs, and facility ownership require ICE/DHS datasets.
-- Historical backlog trends require monthly EOIR archives or EOIR yearbook aggregates. The current backlog file is a current-release snapshot.
+- Official month-by-month historical backlog trends require monthly EOIR archives or EOIR yearbook aggregates. The current backlog file is a derived annual inventory from current-release proceeding start and decision dates.
 - Expedited removal usually happens outside immigration court, so removal outputs are immigration-court proceeding decisions.
 
 ## Future Data Work

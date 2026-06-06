@@ -433,14 +433,71 @@ def build_backlog_timeline(con: duckdb.DuckDBPyConnection) -> None:
     latest = con.execute("""
         SELECT MAX(_last_seen_release) FROM canonical_cases
     """).fetchone()[0]
-    pending = con.execute("""
-        SELECT COUNT(DISTINCT p.IDNCASE)
-        FROM canonical_proceedings p
-        WHERE p._current = TRUE
-          AND (p.DECISION_DATE IS NULL OR p.DECISION_DATE = '')
-    """).fetchone()[0]
     year = int(str(latest).split("-")[0]) if latest else datetime.now().year
-    save(pd.DataFrame([{"fiscal_year": year, "pending_cases": pending}]), "backlog_timeline")
+    df = con.execute(f"""
+        WITH base AS (
+            SELECT
+                IDNPROCEEDING,
+                CASE
+                    WHEN start_date IS NULL THEN NULL
+                    WHEN MONTH(start_date) >= 10 THEN YEAR(start_date) + 1
+                    ELSE YEAR(start_date)
+                END AS start_fy,
+                CASE
+                    WHEN decision_date IS NULL THEN NULL
+                    WHEN MONTH(decision_date) >= 10 THEN YEAR(decision_date) + 1
+                    ELSE YEAR(decision_date)
+                END AS decision_fy
+            FROM (
+                SELECT
+                    IDNPROCEEDING,
+                    COALESCE(
+                        TRY_CAST(NULLIF(INPUT_DATE, '') AS TIMESTAMP),
+                        TRY_CAST(NULLIF(OSC_DATE, '') AS TIMESTAMP),
+                        TRY_CAST(NULLIF(HEARING_DATE, '') AS TIMESTAMP)
+                    ) AS start_date,
+                    TRY_CAST(NULLIF(DECISION_DATE, '') AS TIMESTAMP) AS decision_date
+                FROM canonical_proceedings
+                WHERE _current = TRUE
+            )
+            WHERE start_date IS NOT NULL
+        ),
+        years AS (
+            SELECT range AS fiscal_year FROM range(1900, {year + 1})
+        ),
+        opened AS (
+            SELECT start_fy AS fiscal_year, COUNT(DISTINCT IDNPROCEEDING) AS opened_proceedings
+            FROM base
+            WHERE start_fy BETWEEN 1900 AND {year}
+            GROUP BY start_fy
+        ),
+        completed AS (
+            SELECT decision_fy AS fiscal_year, COUNT(DISTINCT IDNPROCEEDING) AS completed_proceedings
+            FROM base
+            WHERE decision_fy BETWEEN 1900 AND {year}
+            GROUP BY decision_fy
+        ),
+        annual AS (
+            SELECT
+                y.fiscal_year,
+                COALESCE(o.opened_proceedings, 0) AS opened_proceedings,
+                COALESCE(c.completed_proceedings, 0) AS completed_proceedings
+            FROM years y
+            LEFT JOIN opened o ON o.fiscal_year = y.fiscal_year
+            LEFT JOIN completed c ON c.fiscal_year = y.fiscal_year
+        )
+        SELECT
+            fiscal_year,
+            SUM(opened_proceedings - completed_proceedings) OVER (
+                ORDER BY fiscal_year ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )::BIGINT AS pending_cases,
+            opened_proceedings,
+            completed_proceedings
+        FROM annual
+        QUALIFY fiscal_year BETWEEN 1990 AND {year}
+        ORDER BY fiscal_year
+    """).df()
+    save(df, "backlog_timeline")
 
 
 def build_case_age_outputs(con: duckdb.DuckDBPyConnection) -> None:

@@ -46,7 +46,7 @@ Verified real-data counts:
 - `utils/data_loader.py` exposes generic loading and metadata for implemented roadmap outputs.
 - `pages/G_Data_Quality.py` previews the new precomputed enhancement tables.
 - `pages/A_Policy_Appeals.py` avoids circuit-specific language that EOIR cannot support.
-- `pages/C_Case_Processing.py` handles a one-year backlog snapshot.
+- `pages/C_Case_Processing.py` shows a derived annual backlog timeline from proceeding start and decision dates.
 - `pages/D_Respondents.py` clamps UAC year sliders to available real-data years.
 - `README.md`, `docs/technical.md`, and `docs/real_data_roadmap.md` describe the real-data state.
 
