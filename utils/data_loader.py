@@ -354,9 +354,13 @@ def load_removal_by_nationality() -> Optional[pd.DataFrame]:
         return None
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
 def load_bia_timeline() -> Optional[pd.DataFrame]:
-    """BIA appeal receipts, completions, outcomes by fiscal year."""
+    """BIA appeal receipts, completions, outcomes by fiscal year.
+
+    This intentionally avoids Streamlit's one-hour cache because the appeal
+    aggregate has been iterated frequently during data QA. Reading the small
+    Parquet directly prevents a running app from showing stale zeroed outcomes.
+    """
     path = _DATA / "bia_timeline.parquet"
     if not path.exists():
         return None

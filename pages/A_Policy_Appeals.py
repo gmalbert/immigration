@@ -8,6 +8,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import streamlit as st
+import pandas as pd
 import plotly.graph_objects as go
 
 from utils import add_sidebar, no_data_banner, format_num, format_pct, csv_download_button
@@ -247,22 +248,32 @@ with tab_appeals:
                                 key="app_bia_dl")
 
         with atab2:
-            fig2 = go.Figure()
-            for y_col, name, color in [
+            outcome_series = [
                 ("dismissed", "Dismissed / Denied / Affirmed", C_DISMISS),
                 ("remanded",  "Remanded to IJ",          C_REMAND),
                 ("sustained", "Sustained / Granted",     C_SUSTAIN),
                 ("dhs_appeals","DHS / INS Appeals",      C_DHS),
-            ]:
-                fig2.add_trace(go.Bar(x=df["fiscal_year"], y=df[y_col],
-                    name=name, marker_color=color,
-                    hovertemplate=f"FY%{{x}} — {name}: %{{y:,.0f}}<extra></extra>"))
-            fig2.update_layout(barmode="stack",
-                yaxis=dict(title="Cases", tickformat=","),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                hovermode="x unified", margin=dict(t=60, b=40), height=440)
-            fig2 = _add_admin_bands(fig2)
-            st.plotly_chart(fig2, width="stretch")
+            ]
+            outcome_cols = [col for col, _, _ in outcome_series]
+            outcome_df = df[["fiscal_year", "completions", *outcome_cols]].copy()
+            outcome_df[outcome_cols] = outcome_df[outcome_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
+            if outcome_df[outcome_cols].sum().sum() == 0:
+                st.warning(
+                    "BIA outcome categories are present but all values are zero in the loaded data. "
+                    "Refresh Streamlit or rebuild `data/bia_timeline.parquet` if this persists."
+                )
+            else:
+                fig2 = go.Figure()
+                for y_col, name, color in outcome_series:
+                    fig2.add_trace(go.Bar(x=outcome_df["fiscal_year"], y=outcome_df[y_col],
+                        name=name, marker_color=color,
+                        hovertemplate=f"FY%{{x}} — {name}: %{{y:,.0f}}<extra></extra>"))
+                fig2.update_layout(barmode="stack",
+                    yaxis=dict(title="Cases", tickformat=","),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode="x unified", margin=dict(t=60, b=40), height=440)
+                fig2 = _add_admin_bands(fig2)
+                st.plotly_chart(fig2, width="stretch")
 
             df_nr = df.copy()
             df_nr["non_affirm_rate"] = (df_nr["sustained"] + df_nr["remanded"]) / df_nr["completions"]
@@ -277,6 +288,16 @@ with tab_appeals:
                                margin=dict(t=30, b=40), height=250)
             fig3 = _add_admin_bands(fig3)
             st.plotly_chart(fig3, width="stretch")
+
+            table_df = outcome_df.sort_values("fiscal_year", ascending=False).rename(columns={
+                "fiscal_year": "Fiscal Year",
+                "completions": "Completions",
+                "dismissed": "Dismissed / Denied / Affirmed",
+                "remanded": "Remanded",
+                "sustained": "Sustained / Granted",
+                "dhs_appeals": "DHS / INS Appeals",
+            })
+            st.dataframe(table_df, width="stretch", hide_index=True, height=320)
 
             with st.expander("BIA streamlining — what happened in 2002?"):
                 st.markdown("""
