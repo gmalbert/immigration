@@ -154,14 +154,18 @@ with tab_ia:
             if ia_court_df is None or ia_court_df.empty:
                 st.info("Court-level in absentia data not available.")
             else:
-                ia_c = ia_court_df.sort_values("in_absentia_rate", ascending=True)
+                ia_c = ia_court_df.sort_values("in_absentia_rate", ascending=False)
                 fig3 = px.bar(ia_c, x="in_absentia_rate", y="court_city", orientation="h",
                     color="in_absentia_rate", color_continuous_scale="Reds",
                     text=ia_c["in_absentia_rate"].map("{:.1%}".format),
                     labels={"in_absentia_rate": "IA Rate", "court_city": "Court"})
                 fig3.update_coloraxes(showscale=False)
                 fig3.update_traces(textposition="outside")
-                fig3.update_layout(yaxis=dict(autorange="reversed"),
+                fig3.update_layout(yaxis=dict(
+                    categoryorder="array",
+                    categoryarray=ia_c["court_city"].tolist(),
+                    autorange="reversed",
+                ),
                     height=max(380, len(ia_c)*25 + 80), margin=dict(t=20, b=40))
                 st.plotly_chart(fig3, width="stretch")
         csv_download_button(ia_time_df, "relief_docket_in_absentia.csv", key="ia_dl")
