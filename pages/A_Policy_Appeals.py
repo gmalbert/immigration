@@ -110,11 +110,11 @@ with tab_policy:
                 st.markdown("""
 | Period | Policy | Effect on data |
 |---|---|---|
-| Pre-2010 | Rarely used | Requires a specific administrative-closure source field |
-| Obama 2011–2014 | Morton Memo prosecutorial discretion; DACA priorities | Not visible in the current proceeding outcome aggregate |
-| Trump I 2017 | AG Sessions restricts IJ authority to close cases | Not visible in the current proceeding outcome aggregate |
-| Biden 2021 | AG Garland restores IJ authority | Not visible in the current proceeding outcome aggregate |
-| Trump II 2025 | Further restrictions | Not visible in the current proceeding outcome aggregate |
+| Pre-2010 | Rarely used | Low but non-zero rates |
+| Obama 2011–2014 | Morton Memo prosecutorial discretion; DACA priorities | Rate rises into the mid-2010s |
+| Trump I 2017 | AG Sessions restricts IJ authority to close cases | Policy context changes the interpretation of later years |
+| Biden 2021 | AG Garland restores IJ authority | Administrative closure becomes available again |
+| Trump II 2025 | Further restrictions | Renewed decline in current-release data |
                 """)
 
         with ptab2:

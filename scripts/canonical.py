@@ -387,19 +387,20 @@ def _create_lookup_temp_tables(con: duckdb.DuckDBPyConnection) -> None:
             CREATE OR REPLACE TEMP TABLE _decision_lookup AS
             SELECT
                 strCaseType::TEXT AS CASE_TYPE,
+                strDecType::TEXT AS DEC_TYPE,
                 strDecCode::TEXT AS OUTCOME,
                 strDecDescription::TEXT AS OUTCOME_DESCRIPTION,
                 strFinalDisposition::TEXT AS FINAL_DISPOSITION
             FROM rel.tblLookupCourtDecision
             QUALIFY row_number() OVER (
-                PARTITION BY strCaseType, strDecCode
+                PARTITION BY strCaseType, strDecType, strDecCode
                 ORDER BY blnActive DESC NULLS LAST
             ) = 1
         """)
     else:
         con.execute("""
             CREATE OR REPLACE TEMP TABLE _decision_lookup (
-                CASE_TYPE TEXT, OUTCOME TEXT, OUTCOME_DESCRIPTION TEXT, FINAL_DISPOSITION TEXT
+                CASE_TYPE TEXT, DEC_TYPE TEXT, OUTCOME TEXT, OUTCOME_DESCRIPTION TEXT, FINAL_DISPOSITION TEXT
             )
         """)
 
@@ -470,7 +471,10 @@ def _stage_release(con: duckdb.DuckDBPyConnection) -> None:
         FROM rel.B_TblProceeding p
         LEFT JOIN _court_lookup c ON c.COURT = p.HEARING_LOC_CODE
         LEFT JOIN _judge_lookup j ON j.IJ_CODE = p.IJ_CODE
-        LEFT JOIN _decision_lookup d ON d.CASE_TYPE = p.CASE_TYPE AND d.OUTCOME = p.DEC_CODE
+        LEFT JOIN _decision_lookup d
+            ON d.CASE_TYPE = p.CASE_TYPE
+           AND d.DEC_TYPE = p.DEC_TYPE
+           AND d.OUTCOME = p.DEC_CODE
         WHERE p.IDNPROCEEDING IS NOT NULL
     """)
 
