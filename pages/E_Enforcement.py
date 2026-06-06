@@ -376,9 +376,14 @@ with tab_bond:
     if bond_df is None or bond_df.empty:
         no_data_banner()
     else:
-        bond_sorted = bond_df.sort_values("fiscal_year")
+        bond_all = bond_df.sort_values("fiscal_year").copy()
+        bond_sorted = bond_all[bond_all["total_hearings"].fillna(0) >= 100].copy()
+        if bond_sorted.empty:
+            bond_sorted = bond_all.copy()
         lb = bond_sorted.iloc[-1]
         pb = bond_sorted.iloc[-2] if len(bond_sorted) > 1 else lb
+        median_bond = lb.get("median_bond")
+        prev_median_bond = pb.get("median_bond")
 
         bc1, bc2, bc3, bc4 = st.columns(4)
         bc1.metric(f"Bond Hearings (FY{int(lb['fiscal_year'])})",
@@ -387,19 +392,27 @@ with tab_bond:
                    delta_color="off")
         bc2.metric("Grant Rate", format_pct(lb["grant_rate"]),
                    delta=f"{(lb['grant_rate'] - pb['grant_rate'])*100:+.1f}pp")
-        bc3.metric("Median Bond Amount",
-                   f"${lb['median_bond']:,.0f}",
-                   delta=f"${lb['median_bond'] - pb['median_bond']:+,.0f}",
-                   delta_color="inverse")
+        if pd.notna(median_bond):
+            bond_delta = None
+            if pd.notna(prev_median_bond):
+                bond_delta = f"${median_bond - prev_median_bond:+,.0f}"
+            bc3.metric("Median Bond Amount",
+                       f"${median_bond:,.0f}",
+                       delta=bond_delta,
+                       delta_color="inverse")
+        else:
+            bc3.metric("Median Bond Amount", "Not available")
         if "detention_rate_post" in lb:
             bc4.metric("Detention Rate Post-Hearing", format_pct(lb["detention_rate_post"]))
+        if len(bond_sorted) != len(bond_all):
+            st.caption("Tiny partial-year bond buckets are excluded from headline metrics and charts.")
 
         bond_yr = st.slider("Fiscal year range",
-            min_value=int(bond_df["fiscal_year"].min()),
-            max_value=int(bond_df["fiscal_year"].max()),
-            value=(2005, int(bond_df["fiscal_year"].max())),
+            min_value=int(bond_sorted["fiscal_year"].min()),
+            max_value=int(bond_sorted["fiscal_year"].max()),
+            value=(2005, int(bond_sorted["fiscal_year"].max())),
             key="bond_yr_range")
-        bond_f = bond_df[bond_df["fiscal_year"].between(bond_yr[0], bond_yr[1])].copy()
+        bond_f = bond_sorted[bond_sorted["fiscal_year"].between(bond_yr[0], bond_yr[1])].copy()
         bond_f = bond_f.sort_values("fiscal_year")
 
         # Chart 1: grant rate trend
@@ -416,9 +429,10 @@ with tab_bond:
         fig1 = _add_admin_bands(fig1)
 
         # Chart 2: median bond
+        bond_amt_f = bond_f.dropna(subset=["median_bond"])
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(
-            x=bond_f["fiscal_year"], y=bond_f["median_bond"],
+            x=bond_amt_f["fiscal_year"], y=bond_amt_f["median_bond"],
             mode="lines+markers", name="Median Bond Amount",
             line=dict(color="#c0392b", width=2.5),
             fill="tozeroy", fillcolor="rgba(192,57,43,0.12)",

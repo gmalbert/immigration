@@ -704,6 +704,7 @@ def build_bond_outputs(con: duckdb.DuckDBPyConnection) -> None:
         FROM base
         WHERE fiscal_year BETWEEN 1990 AND 2027
         GROUP BY fiscal_year
+        HAVING total_hearings >= 100
         ORDER BY fiscal_year
     """).df()
     save(df, "bond_analytics")
@@ -1283,6 +1284,7 @@ def build_bond_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
         FROM base
         WHERE fiscal_year BETWEEN 1990 AND 2027
         GROUP BY fiscal_year
+        HAVING bond_hearings >= 100
         ORDER BY fiscal_year
     """).df()
     save(by_year, "bond_by_year")
