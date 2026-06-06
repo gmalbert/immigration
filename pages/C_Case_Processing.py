@@ -16,7 +16,7 @@ import numpy as np
 
 from utils import add_sidebar, no_data_banner, format_num, format_pct, csv_download_button
 from utils.data_loader import (
-    load_case_outcomes, load_backlog_timeline,
+    load_case_outcomes, load_case_outcomes_annual, load_backlog_timeline,
     load_case_age_timeline, load_case_age_by_court, load_backlog_age_dist,
     get_pipeline_status,
 )
@@ -43,6 +43,7 @@ if status.get("seed_mode"):
 
 # Load all data
 outcomes_df  = load_case_outcomes()
+outcomes_annual_df = load_case_outcomes_annual()
 backlog_df   = load_backlog_timeline()
 age_df       = load_case_age_timeline()
 court_age_df = load_case_age_by_court()
@@ -88,18 +89,24 @@ with tab_out:
             st.plotly_chart(fig, width='stretch')
 
         st.markdown("### Annual Summary")
-        pivot = (
-            filt.pivot_table(index="fiscal_year", columns="outcome_type",
-                             values="case_count", aggfunc="sum", fill_value=0)
-            .reset_index()
-            .sort_values("fiscal_year", ascending=False)
-        )
-        pivot.columns.name = None
-        pivot["Total"] = pivot.select_dtypes("number").sum(axis=1)
-        if "Granted" in pivot.columns:
-            total_d = pivot.get("Granted", 0) + pivot.get("Removed", 0) + pivot.get("Voluntary Departure", 0)
-            pivot["Grant Rate"] = (pivot.get("Granted", 0) / total_d.replace(0, float("nan"))).map(
-                lambda v: f"{v*100:.1f}%" if pd.notna(v) else "—")
+        if outcomes_annual_df is not None and not outcomes_annual_df.empty:
+            summary_cols = ["fiscal_year", *selected_outcomes]
+            summary_cols = [c for c in summary_cols if c in outcomes_annual_df.columns]
+            pivot = outcomes_annual_df[
+                outcomes_annual_df["fiscal_year"].between(year_range[0], year_range[1])
+            ][summary_cols].copy()
+            outcome_cols = [c for c in pivot.columns if c != "fiscal_year"]
+            pivot["Total"] = pivot[outcome_cols].sum(axis=1)
+            pivot = pivot.sort_values("fiscal_year", ascending=False)
+        else:
+            pivot = (
+                filt.pivot_table(index="fiscal_year", columns="outcome_type",
+                                 values="case_count", aggfunc="sum", fill_value=0)
+                .reset_index()
+                .sort_values("fiscal_year", ascending=False)
+            )
+            pivot.columns.name = None
+            pivot["Total"] = pivot.select_dtypes("number").drop(columns=["fiscal_year"], errors="ignore").sum(axis=1)
         from utils import clean_dataframe_columns
         st.dataframe(clean_dataframe_columns(pivot.set_index("fiscal_year")), width='stretch', height=400)
 
@@ -148,13 +155,19 @@ with tab_backlog:
         col3.metric("Peak Year", f"FY{int(peak_bl['fiscal_year'])}",
                     format_num(peak_bl["pending_cases"]))
 
-        bl_yr = st.slider(
-            "Fiscal Year Range",
-            min_value=int(backlog_df["fiscal_year"].min()),
-            max_value=int(backlog_df["fiscal_year"].max()),
-            value=(1998, int(backlog_df["fiscal_year"].max())),
-            key="backlog_years",
-        )
+        bl_min = int(backlog_df["fiscal_year"].min())
+        bl_max = int(backlog_df["fiscal_year"].max())
+        if bl_min == bl_max:
+            bl_yr = (bl_min, bl_max)
+            st.caption(f"Backlog snapshot available for FY{bl_max}.")
+        else:
+            bl_yr = st.slider(
+                "Fiscal Year Range",
+                min_value=bl_min,
+                max_value=bl_max,
+                value=(max(1998, bl_min), bl_max),
+                key="backlog_years",
+            )
         chart_bl = backlog_df[backlog_df["fiscal_year"].between(bl_yr[0], bl_yr[1])].copy()
         fig_bl = backlog_timeline_chart(chart_bl)
         if fig_bl:
@@ -211,7 +224,7 @@ with tab_age:
         max_yr_a = int(age_df["fiscal_year"].max())
         age_yr = st.slider("Fiscal year range",
             min_value=min_yr_a, max_value=max_yr_a,
-            value=(2005, max_yr_a), key="age_yr_range")
+            value=(max(2005, min_yr_a), max_yr_a), key="age_yr_range")
         age_f = age_df[(age_df["fiscal_year"] >= age_yr[0]) & (age_df["fiscal_year"] <= age_yr[1])].copy()
 
         la = age_f.iloc[-1]

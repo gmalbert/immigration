@@ -187,15 +187,15 @@ with tab_appeals:
         col3.metric("Non-Affirmance Rate", format_pct(reversal_rate),
                     delta=f"{(reversal_rate - prev_rev_rate)*100:+.1f}pp", delta_color="off")
         if circ_df is not None and not circ_df.empty:
-            ninth = circ_df[circ_df["circuit"] == "9th"]["reversal_rate"].values
-            col4.metric("9th Circuit Reversal Rate",
-                        format_pct(ninth[0] if len(ninth) else circ_df["reversal_rate"].mean()))
+            fed = circ_df[circ_df["circuit"] == "FED"]["reversal_rate"].values
+            col4.metric("Federal Appeal Remand Rate",
+                        format_pct(fed[0] if len(fed) else circ_df["reversal_rate"].mean()))
         else:
             col4.metric("Circuit Data", "—")
 
         atab1, atab2, atab3 = st.tabs(["📈 BIA Volume & Backlog",
                                         "📊 BIA Outcome Breakdown",
-                                        "🏛️ Circuit Courts"])
+                                        "🏛️ Federal Courts"])
 
         with atab1:
             fig = go.Figure()
@@ -277,7 +277,7 @@ for review in the federal circuit courts after 2003.
                         x=[row["petitions_filed"]], y=[row["reversal_rate"]],
                         mode="markers+text",
                         name=row.get("circuit_name", row["circuit"]),
-                        text=[row["circuit"] + " Cir."],
+                        text=[row["circuit"]],
                         textposition="top center",
                         marker=dict(
                             size=max(12, row["petitions_filed"] / circ_sorted["petitions_filed"].max() * 60),
@@ -304,7 +304,7 @@ for review in the federal circuit courts after 2003.
                     color="reversal_rate",
                     color_continuous_scale=["#c0392b", "#f1c40f", "#1e8a50"],
                     text=circ_sorted["reversal_rate"].map("{:.1%}".format),
-                    labels={"reversal_rate": "Reversal Rate", "circuit": "Circuit"},
+                    labels={"reversal_rate": "Remand/Grant Rate", "circuit": "EOIR Category"},
                 )
                 fig5.update_coloraxes(showscale=False)
                 fig5.update_traces(textposition="outside")

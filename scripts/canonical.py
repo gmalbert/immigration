@@ -31,9 +31,14 @@ def qident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def get_canonical_con() -> duckdb.DuckDBPyConnection:
+def get_canonical_con(db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
     SILVER_DIR.mkdir(parents=True, exist_ok=True)
-    return duckdb.connect(str(CANONICAL_DB))
+    con = duckdb.connect(str(db_path or CANONICAL_DB))
+    # The EOIR release is large enough that a conservative local profile is
+    # more reliable on ordinary laptops than DuckDB's default parallelism.
+    con.execute("PRAGMA threads=1")
+    con.execute("PRAGMA memory_limit='4GB'")
+    return con
 
 
 def _table_exists(con: duckdb.DuckDBPyConnection, table_name: str) -> bool:
@@ -68,7 +73,12 @@ def init_canonical(con: duckdb.DuckDBPyConnection) -> None:
             CUSTDY                 TEXT,
             ATTY_NBR               TEXT,
             CASE_TYPE              TEXT,
+            LATEST_HEARING         TEXT,
+            DATE_DETAINED          TEXT,
+            DATE_RELEASED          TEXT,
+            DETENTION_DATE         TEXT,
             DETENTION_LOCATION     TEXT,
+            DETENTION_FACILITY_TYPE TEXT,
             _first_seen_release    TEXT NOT NULL,
             _last_seen_release     TEXT NOT NULL,
             _ever_deleted          BOOLEAN DEFAULT FALSE,
@@ -88,6 +98,9 @@ def init_canonical(con: duckdb.DuckDBPyConnection) -> None:
             COURT_STATE            TEXT,
             CIRCUIT                TEXT,
             PROCEEDING_TYPE        TEXT,
+            OSC_DATE               TEXT,
+            INPUT_DATE             TEXT,
+            HEARING_DATE           TEXT,
             OUTCOME                TEXT,
             OUTCOME_DESCRIPTION    TEXT,
             DECISION_DATE          TEXT,
@@ -96,6 +109,8 @@ def init_canonical(con: duckdb.DuckDBPyConnection) -> None:
             CUSTODY                TEXT,
             NAT                    TEXT,
             LANG                   TEXT,
+            DATE_DETAINED          TEXT,
+            DATE_RELEASED          TEXT,
             _first_seen_release    TEXT NOT NULL,
             _last_seen_release     TEXT NOT NULL,
             _ever_deleted          BOOLEAN DEFAULT FALSE,
@@ -129,6 +144,107 @@ def init_canonical(con: duckdb.DuckDBPyConnection) -> None:
             _last_seen_release     TEXT NOT NULL
         )
     """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_bonds (
+            IDNBOND                TEXT PRIMARY KEY,
+            IDNPROCEEDING          TEXT,
+            IDNCASE                TEXT,
+            IJ_CODE                TEXT,
+            COURT                  TEXT,
+            COURT_CITY             TEXT,
+            DECISION               TEXT,
+            DECISION_DATE          TEXT,
+            INITIAL_BOND           DOUBLE,
+            NEW_BOND               DOUBLE,
+            BOND_TYPE              TEXT,
+            REQUEST_DATE           TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_custody_history (
+            IDNCUSTODY             TEXT PRIMARY KEY,
+            IDNCASE                TEXT,
+            CUSTODY                TEXT,
+            DATDETAINED            TEXT,
+            DATRELEASED            TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_juvenile_history (
+            IDNJUVENILEHISTORY     TEXT PRIMARY KEY,
+            IDNCASE                TEXT,
+            IDNPROCEEDING          TEXT,
+            IDNJUVENILE            TEXT,
+            CREATED_ON             TEXT,
+            MODIFIED_ON            TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_appeals (
+            IDNAPPEAL              TEXT PRIMARY KEY,
+            IDNCASE                TEXT,
+            IDNPROCEEDING          TEXT,
+            APPEAL_CATEGORY        TEXT,
+            APPEAL_TYPE            TEXT,
+            FILED_DATE             TEXT,
+            FILED_BY               TEXT,
+            BIA_DECISION_DATE      TEXT,
+            BIA_DECISION           TEXT,
+            BIA_DECISION_TYPE      TEXT,
+            CASE_TYPE              TEXT,
+            NAT                    TEXT,
+            CUSTODY                TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_fed_appeals (
+            IDNFEDAPPEAL           TEXT PRIMARY KEY,
+            IDNAPPEAL              TEXT,
+            REQUESTED_BY_OIL_DATE  TEXT,
+            FED_DECISION_DATE      TEXT,
+            FED_DECISION           TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS canonical_three_member_referrals (
+            IDNREFERRAL            TEXT PRIMARY KEY,
+            IDNAPPEAL              TEXT,
+            REFERRED_DATE          TEXT,
+            REMOVED_DATE           TEXT,
+            _last_seen_release     TEXT NOT NULL
+        )
+    """)
+
+    # Older canonical DBs may exist from earlier pipeline versions.
+    for table_name, columns in {
+        "canonical_cases": {
+            "LATEST_HEARING": "TEXT",
+            "DATE_DETAINED": "TEXT",
+            "DATE_RELEASED": "TEXT",
+            "DETENTION_DATE": "TEXT",
+            "DETENTION_FACILITY_TYPE": "TEXT",
+        },
+        "canonical_proceedings": {
+            "OSC_DATE": "TEXT",
+            "INPUT_DATE": "TEXT",
+            "HEARING_DATE": "TEXT",
+            "DATE_DETAINED": "TEXT",
+            "DATE_RELEASED": "TEXT",
+        },
+    }.items():
+        for col, col_type in columns.items():
+            con.execute(f"ALTER TABLE {qident(table_name)} ADD COLUMN IF NOT EXISTS {qident(col)} {col_type}")
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS _release_log (
@@ -229,10 +345,14 @@ def _stage_release(con: duckdb.DuckDBPyConnection) -> None:
             CUSTODY::TEXT AS CUSTDY,
             ATTY_NBR::TEXT AS ATTY_NBR,
             CASE_TYPE::TEXT AS CASE_TYPE,
-            DETENTION_LOCATION::TEXT AS DETENTION_LOCATION
+            LATEST_HEARING::TEXT AS LATEST_HEARING,
+            DATE_DETAINED::TEXT AS DATE_DETAINED,
+            DATE_RELEASED::TEXT AS DATE_RELEASED,
+            DETENTION_DATE::TEXT AS DETENTION_DATE,
+            DETENTION_LOCATION::TEXT AS DETENTION_LOCATION,
+            DETENTION_FACILITY_TYPE::TEXT AS DETENTION_FACILITY_TYPE
         FROM rel.A_TblCase
         WHERE IDNCASE IS NOT NULL
-        QUALIFY row_number() OVER (PARTITION BY IDNCASE ORDER BY IDNCASE) = 1
     """)
 
     con.execute("""
@@ -247,6 +367,9 @@ def _stage_release(con: duckdb.DuckDBPyConnection) -> None:
             c.COURT_STATE::TEXT AS COURT_STATE,
             c.CIRCUIT::TEXT AS CIRCUIT,
             p.CASE_TYPE::TEXT AS PROCEEDING_TYPE,
+            p.OSC_DATE::TEXT AS OSC_DATE,
+            p.INPUT_DATE::TEXT AS INPUT_DATE,
+            p.HEARING_DATE::TEXT AS HEARING_DATE,
             p.DEC_CODE::TEXT AS OUTCOME,
             d.OUTCOME_DESCRIPTION::TEXT AS OUTCOME_DESCRIPTION,
             p.COMP_DATE::TEXT AS DECISION_DATE,
@@ -258,13 +381,14 @@ def _stage_release(con: duckdb.DuckDBPyConnection) -> None:
             p.ABSENTIA::TEXT AS ABSENTIA,
             p.CUSTODY::TEXT AS CUSTODY,
             p.NAT::TEXT AS NAT,
-            p.LANG::TEXT AS LANG
+            p.LANG::TEXT AS LANG,
+            p.DATE_DETAINED::TEXT AS DATE_DETAINED,
+            p.DATE_RELEASED::TEXT AS DATE_RELEASED
         FROM rel.B_TblProceeding p
         LEFT JOIN _court_lookup c ON c.COURT = p.HEARING_LOC_CODE
         LEFT JOIN _judge_lookup j ON j.IJ_CODE = p.IJ_CODE
         LEFT JOIN _decision_lookup d ON d.CASE_TYPE = p.CASE_TYPE AND d.OUTCOME = p.DEC_CODE
         WHERE p.IDNPROCEEDING IS NOT NULL
-        QUALIFY row_number() OVER (PARTITION BY p.IDNPROCEEDING ORDER BY p.COMP_DATE DESC NULLS LAST) = 1
     """)
 
     con.execute("""
@@ -279,7 +403,6 @@ def _stage_release(con: duckdb.DuckDBPyConnection) -> None:
             APPL_DEC::TEXT AS DECISION
         FROM rel.E_TblApplication
         WHERE IDNPROCEEDINGAPPLN IS NOT NULL
-        QUALIFY row_number() OVER (PARTITION BY IDNPROCEEDINGAPPLN ORDER BY APPL_RECD_DATE DESC NULLS LAST) = 1
     """)
 
     if "tblLookupNationality" in rel_tables:
@@ -303,6 +426,141 @@ def _stage_release(con: duckdb.DuckDBPyConnection) -> None:
             )
         """)
 
+    if False and "D_TblAssociatedBond" in rel_tables:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_bonds AS
+            SELECT
+                IDNASSOCBOND::TEXT AS IDNBOND,
+                IDNPROCEEDING::TEXT AS IDNPROCEEDING,
+                IDNCASE::TEXT AS IDNCASE,
+                IJ_CODE::TEXT AS IJ_CODE,
+                HEARING_LOC_CODE::TEXT AS COURT,
+                BASE_CITY_NAME::TEXT AS COURT_CITY,
+                DEC::TEXT AS DECISION,
+                COMP_DATE::TEXT AS DECISION_DATE,
+                TRY_CAST(INITIAL_BOND AS DOUBLE) AS INITIAL_BOND,
+                TRY_CAST(NEW_BOND AS DOUBLE) AS NEW_BOND,
+                BOND_TYPE::TEXT AS BOND_TYPE,
+                BOND_HEAR_REQ_DATE::TEXT AS REQUEST_DATE
+        FROM rel.D_TblAssociatedBond
+        WHERE IDNASSOCBOND IS NOT NULL
+    """)
+    else:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_bonds (
+                IDNBOND TEXT, IDNPROCEEDING TEXT, IDNCASE TEXT, IJ_CODE TEXT,
+                COURT TEXT, COURT_CITY TEXT, DECISION TEXT, DECISION_DATE TEXT,
+                INITIAL_BOND DOUBLE, NEW_BOND DOUBLE, BOND_TYPE TEXT, REQUEST_DATE TEXT
+            )
+        """)
+
+    if False and "tbl_CustodyHistory" in rel_tables:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_custody AS
+            SELECT
+                IDNCUSTODY::TEXT AS IDNCUSTODY,
+                IDNCASE::TEXT AS IDNCASE,
+                CUSTODY::TEXT AS CUSTODY,
+                DATDETAINED::TEXT AS DATDETAINED,
+                DATRELEASED::TEXT AS DATRELEASED
+        FROM rel.tbl_CustodyHistory
+        WHERE IDNCUSTODY IS NOT NULL
+    """)
+    else:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_custody (
+                IDNCUSTODY TEXT, IDNCASE TEXT, CUSTODY TEXT, DATDETAINED TEXT, DATRELEASED TEXT
+            )
+        """)
+
+    if False and "tbl_JuvenileHistory" in rel_tables:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_juveniles AS
+            SELECT
+                idnJuvenileHistory::TEXT AS IDNJUVENILEHISTORY,
+                idnCase::TEXT AS IDNCASE,
+                idnProceeding::TEXT AS IDNPROCEEDING,
+                idnJuvenile::TEXT AS IDNJUVENILE,
+                DATCREATEDON::TEXT AS CREATED_ON,
+                DATMODIFIEDON::TEXT AS MODIFIED_ON
+        FROM rel.tbl_JuvenileHistory
+        WHERE idnJuvenileHistory IS NOT NULL
+    """)
+    else:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_juveniles (
+                IDNJUVENILEHISTORY TEXT, IDNCASE TEXT, IDNPROCEEDING TEXT,
+                IDNJUVENILE TEXT, CREATED_ON TEXT, MODIFIED_ON TEXT
+            )
+        """)
+
+    if False and "tblAppeal" in rel_tables:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_appeals AS
+            SELECT
+                idnAppeal::TEXT AS IDNAPPEAL,
+                idncase::TEXT AS IDNCASE,
+                idnProceeding::TEXT AS IDNPROCEEDING,
+                strAppealCategory::TEXT AS APPEAL_CATEGORY,
+                strAppealType::TEXT AS APPEAL_TYPE,
+                datAppealFiled::TEXT AS FILED_DATE,
+                strFiledBy::TEXT AS FILED_BY,
+                datBIADecision::TEXT AS BIA_DECISION_DATE,
+                strBIADecision::TEXT AS BIA_DECISION,
+                strBIADecisionType::TEXT AS BIA_DECISION_TYPE,
+                strCaseType::TEXT AS CASE_TYPE,
+                strNat::TEXT AS NAT,
+                strCustody::TEXT AS CUSTODY
+        FROM rel.tblAppeal
+        WHERE idnAppeal IS NOT NULL
+    """)
+    else:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_appeals (
+                IDNAPPEAL TEXT, IDNCASE TEXT, IDNPROCEEDING TEXT, APPEAL_CATEGORY TEXT,
+                APPEAL_TYPE TEXT, FILED_DATE TEXT, FILED_BY TEXT, BIA_DECISION_DATE TEXT,
+                BIA_DECISION TEXT, BIA_DECISION_TYPE TEXT, CASE_TYPE TEXT, NAT TEXT, CUSTODY TEXT
+            )
+        """)
+
+    if False and "tblAppealFedCourts" in rel_tables:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_fed_appeals AS
+            SELECT
+                idnAppealFedCourts::TEXT AS IDNFEDAPPEAL,
+                lngAppealID::TEXT AS IDNAPPEAL,
+                datRequestedByOIL::TEXT AS REQUESTED_BY_OIL_DATE,
+                NULL::TEXT AS FED_DECISION_DATE,
+                strFedCourtDecision::TEXT AS FED_DECISION
+            FROM rel.tblAppealFedCourts
+            WHERE idnAppealFedCourts IS NOT NULL
+        """)
+    else:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_fed_appeals (
+                IDNFEDAPPEAL TEXT, IDNAPPEAL TEXT, REQUESTED_BY_OIL_DATE TEXT,
+                FED_DECISION_DATE TEXT, FED_DECISION TEXT
+            )
+        """)
+
+    if False and "tblThreeMbrReferrals" in rel_tables:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_three_member_referrals AS
+            SELECT
+                idn3MemberReferral::TEXT AS IDNREFERRAL,
+                lngAppealID::TEXT AS IDNAPPEAL,
+                datReferredTo3Member::TEXT AS REFERRED_DATE,
+                datRemovedFromReferral::TEXT AS REMOVED_DATE
+            FROM rel.tblThreeMbrReferrals
+            WHERE idn3MemberReferral IS NOT NULL
+        """)
+    else:
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE _new_three_member_referrals (
+                IDNREFERRAL TEXT, IDNAPPEAL TEXT, REFERRED_DATE TEXT, REMOVED_DATE TEXT
+            )
+        """)
+
 
 def _merge_table(
     con: duckdb.DuckDBPyConnection,
@@ -314,6 +572,22 @@ def _merge_table(
 ) -> int:
     all_insert_cols = [pk, *data_cols, "_first_seen_release", "_last_seen_release"]
     select_cols = [pk, *data_cols, f"'{release_tag}'", f"'{release_tag}'"]
+
+    target_count = con.execute(f"SELECT COUNT(*) FROM {qident(target)}").fetchone()[0]
+    if target_count == 0:
+        con.execute(f"""
+            INSERT INTO {qident(target)}
+                ({', '.join(qident(c) for c in all_insert_cols)})
+            SELECT {', '.join(select_cols)}
+            FROM (
+                SELECT *,
+                       row_number() OVER (PARTITION BY {qident(pk)} ORDER BY {qident(pk)}) AS _pk_rank
+                FROM {qident(staged)}
+                WHERE NULLIF(TRIM(REPLACE({qident(pk)}, chr(0), '')), '') IS NOT NULL
+            ) AS s
+            WHERE _pk_rank = 1
+        """)
+        return 0
 
     con.execute(f"""
         INSERT OR IGNORE INTO {qident(target)}
@@ -371,7 +645,9 @@ def upsert_release(
         "IDNCASE",
         [
             "ANUMBER", "NAT", "LANG", "GENDER", "INPUT_DATE", "COMP_DATE",
-            "NTA_DATE", "CUSTDY", "ATTY_NBR", "CASE_TYPE", "DETENTION_LOCATION",
+            "NTA_DATE", "CUSTDY", "ATTY_NBR", "CASE_TYPE", "LATEST_HEARING",
+            "DATE_DETAINED", "DATE_RELEASED", "DETENTION_DATE",
+            "DETENTION_LOCATION", "DETENTION_FACILITY_TYPE",
         ],
         release_tag,
     )
@@ -383,9 +659,10 @@ def upsert_release(
         "IDNPROCEEDING",
         [
             "IDNCASE", "IJ_CODE", "JUDGE_NAME", "COURT", "COURT_CITY",
-            "COURT_STATE", "CIRCUIT", "PROCEEDING_TYPE", "OUTCOME",
+            "COURT_STATE", "CIRCUIT", "PROCEEDING_TYPE",
+            "OSC_DATE", "INPUT_DATE", "HEARING_DATE", "OUTCOME",
             "OUTCOME_DESCRIPTION", "DECISION_DATE", "APPEAL_FILED",
-            "ABSENTIA", "CUSTODY", "NAT", "LANG",
+            "ABSENTIA", "CUSTODY", "NAT", "LANG", "DATE_DETAINED", "DATE_RELEASED",
         ],
         release_tag,
     )
@@ -408,6 +685,173 @@ def upsert_release(
         SELECT NAT_CODE, NAT_NAME, NAT_COUNTRY_NAME, '{release_tag}'
         FROM _new_nationalities
     """)
+
+    con.execute(f"""
+        INSERT OR REPLACE INTO canonical_bonds
+            (IDNBOND, IDNPROCEEDING, IDNCASE, IJ_CODE, COURT, COURT_CITY,
+             DECISION, DECISION_DATE, INITIAL_BOND, NEW_BOND, BOND_TYPE,
+             REQUEST_DATE, _last_seen_release)
+        SELECT IDNBOND, IDNPROCEEDING, IDNCASE, IJ_CODE, COURT, COURT_CITY,
+               DECISION, DECISION_DATE, INITIAL_BOND, NEW_BOND, BOND_TYPE,
+               REQUEST_DATE, '{release_tag}'
+        FROM _new_bonds
+    """)
+
+    con.execute(f"""
+        INSERT OR REPLACE INTO canonical_custody_history
+            (IDNCUSTODY, IDNCASE, CUSTODY, DATDETAINED, DATRELEASED, _last_seen_release)
+        SELECT IDNCUSTODY, IDNCASE, CUSTODY, DATDETAINED, DATRELEASED, '{release_tag}'
+        FROM _new_custody
+    """)
+
+    con.execute(f"""
+        INSERT OR REPLACE INTO canonical_juvenile_history
+            (IDNJUVENILEHISTORY, IDNCASE, IDNPROCEEDING, IDNJUVENILE,
+             CREATED_ON, MODIFIED_ON, _last_seen_release)
+        SELECT IDNJUVENILEHISTORY, IDNCASE, IDNPROCEEDING, IDNJUVENILE,
+               CREATED_ON, MODIFIED_ON, '{release_tag}'
+        FROM _new_juveniles
+    """)
+
+    con.execute(f"""
+        INSERT OR REPLACE INTO canonical_appeals
+            (IDNAPPEAL, IDNCASE, IDNPROCEEDING, APPEAL_CATEGORY, APPEAL_TYPE,
+             FILED_DATE, FILED_BY, BIA_DECISION_DATE, BIA_DECISION,
+             BIA_DECISION_TYPE, CASE_TYPE, NAT, CUSTODY, _last_seen_release)
+        SELECT IDNAPPEAL, IDNCASE, IDNPROCEEDING, APPEAL_CATEGORY, APPEAL_TYPE,
+               FILED_DATE, FILED_BY, BIA_DECISION_DATE, BIA_DECISION,
+               BIA_DECISION_TYPE, CASE_TYPE, NAT, CUSTODY, '{release_tag}'
+        FROM _new_appeals
+    """)
+
+    con.execute(f"""
+        INSERT OR REPLACE INTO canonical_fed_appeals
+            (IDNFEDAPPEAL, IDNAPPEAL, REQUESTED_BY_OIL_DATE, FED_DECISION_DATE,
+             FED_DECISION, _last_seen_release)
+        SELECT IDNFEDAPPEAL, IDNAPPEAL, REQUESTED_BY_OIL_DATE, FED_DECISION_DATE,
+               FED_DECISION, '{release_tag}'
+        FROM _new_fed_appeals
+    """)
+
+    con.execute(f"""
+        INSERT OR REPLACE INTO canonical_three_member_referrals
+            (IDNREFERRAL, IDNAPPEAL, REFERRED_DATE, REMOVED_DATE, _last_seen_release)
+        SELECT IDNREFERRAL, IDNAPPEAL, REFERRED_DATE, REMOVED_DATE, '{release_tag}'
+        FROM _new_three_member_referrals
+    """)
+
+    rel_tables = {row[0] for row in con.execute("SHOW TABLES FROM rel").fetchall()}
+
+    if "D_TblAssociatedBond" in rel_tables:
+        con.execute(f"""
+            INSERT OR REPLACE INTO canonical_bonds
+                (IDNBOND, IDNPROCEEDING, IDNCASE, IJ_CODE, COURT, COURT_CITY,
+                 DECISION, DECISION_DATE, INITIAL_BOND, NEW_BOND, BOND_TYPE,
+                 REQUEST_DATE, _last_seen_release)
+            SELECT
+                IDNASSOCBOND::TEXT,
+                IDNPROCEEDING::TEXT,
+                IDNCASE::TEXT,
+                IJ_CODE::TEXT,
+                HEARING_LOC_CODE::TEXT,
+                BASE_CITY_NAME::TEXT,
+                DEC::TEXT,
+                COMP_DATE::TEXT,
+                TRY_CAST(INITIAL_BOND AS DOUBLE),
+                TRY_CAST(NEW_BOND AS DOUBLE),
+                BOND_TYPE::TEXT,
+                BOND_HEAR_REQ_DATE::TEXT,
+                '{release_tag}'
+            FROM rel.D_TblAssociatedBond
+            WHERE IDNASSOCBOND IS NOT NULL
+        """)
+
+    if "tbl_CustodyHistory" in rel_tables:
+        con.execute(f"""
+            INSERT OR REPLACE INTO canonical_custody_history
+                (IDNCUSTODY, IDNCASE, CUSTODY, DATDETAINED, DATRELEASED, _last_seen_release)
+            SELECT
+                IDNCUSTODY::TEXT,
+                IDNCASE::TEXT,
+                CUSTODY::TEXT,
+                DATDETAINED::TEXT,
+                DATRELEASED::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_CustodyHistory
+            WHERE IDNCUSTODY IS NOT NULL
+        """)
+
+    if "tbl_JuvenileHistory" in rel_tables:
+        con.execute(f"""
+            INSERT OR REPLACE INTO canonical_juvenile_history
+                (IDNJUVENILEHISTORY, IDNCASE, IDNPROCEEDING, IDNJUVENILE,
+                 CREATED_ON, MODIFIED_ON, _last_seen_release)
+            SELECT
+                idnJuvenileHistory::TEXT,
+                idnCase::TEXT,
+                idnProceeding::TEXT,
+                idnJuvenile::TEXT,
+                DATCREATEDON::TEXT,
+                DATMODIFIEDON::TEXT,
+                '{release_tag}'
+            FROM rel.tbl_JuvenileHistory
+            WHERE idnJuvenileHistory IS NOT NULL
+        """)
+
+    if "tblAppeal" in rel_tables:
+        con.execute(f"""
+            INSERT OR REPLACE INTO canonical_appeals
+                (IDNAPPEAL, IDNCASE, IDNPROCEEDING, APPEAL_CATEGORY, APPEAL_TYPE,
+                 FILED_DATE, FILED_BY, BIA_DECISION_DATE, BIA_DECISION,
+                 BIA_DECISION_TYPE, CASE_TYPE, NAT, CUSTODY, _last_seen_release)
+            SELECT
+                idnAppeal::TEXT,
+                idncase::TEXT,
+                idnProceeding::TEXT,
+                strAppealCategory::TEXT,
+                strAppealType::TEXT,
+                datAppealFiled::TEXT,
+                strFiledBy::TEXT,
+                datBIADecision::TEXT,
+                strBIADecision::TEXT,
+                strBIADecisionType::TEXT,
+                strCaseType::TEXT,
+                strNat::TEXT,
+                strCustody::TEXT,
+                '{release_tag}'
+            FROM rel.tblAppeal
+            WHERE idnAppeal IS NOT NULL
+        """)
+
+    if "tblAppealFedCourts" in rel_tables:
+        con.execute(f"""
+            INSERT OR REPLACE INTO canonical_fed_appeals
+                (IDNFEDAPPEAL, IDNAPPEAL, REQUESTED_BY_OIL_DATE, FED_DECISION_DATE,
+                 FED_DECISION, _last_seen_release)
+            SELECT
+                idnAppealFedCourts::TEXT,
+                lngAppealID::TEXT,
+                datRequestedByOIL::TEXT,
+                NULL::TEXT,
+                strFedCourtDecision::TEXT,
+                '{release_tag}'
+            FROM rel.tblAppealFedCourts
+            WHERE idnAppealFedCourts IS NOT NULL
+        """)
+
+    if "tblThreeMbrReferrals" in rel_tables:
+        con.execute(f"""
+            INSERT OR REPLACE INTO canonical_three_member_referrals
+                (IDNREFERRAL, IDNAPPEAL, REFERRED_DATE, REMOVED_DATE, _last_seen_release)
+            SELECT
+                idn3MemberReferral::TEXT,
+                lngAppealID::TEXT,
+                datReferredTo3Member::TEXT,
+                datRemovedFromReferral::TEXT,
+                '{release_tag}'
+            FROM rel.tblThreeMbrReferrals
+            WHERE idn3MemberReferral IS NOT NULL
+        """)
 
     stats["case_count"] = con.execute("SELECT COUNT(*) FROM canonical_cases").fetchone()[0]
     stats["proceeding_count"] = con.execute("SELECT COUNT(*) FROM canonical_proceedings").fetchone()[0]
@@ -446,13 +890,19 @@ if __name__ == "__main__":
         default=None,
         help="Optional ingested DuckDB path. Defaults to silver/<release>.duckdb.",
     )
+    parser.add_argument(
+        "--canonical-db",
+        default=None,
+        help="Optional canonical DuckDB output path. Defaults to silver/canonical.duckdb.",
+    )
     args = parser.parse_args()
 
     if not args.release:
         print("No bronze releases found. Run scripts/download.py first.")
         sys.exit(1)
 
-    con = get_canonical_con()
+    canonical_db = Path(args.canonical_db) if args.canonical_db else None
+    con = get_canonical_con(canonical_db)
     init_canonical(con)
     ingest_db = Path(args.ingest_db) if args.ingest_db else None
     stats = upsert_release(con, args.release, ingest_db=ingest_db)

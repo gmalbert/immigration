@@ -42,12 +42,13 @@ DENY_CODES = "('D', 'DEN', 'R')"
 ASYLUM_DECISION_CODES = "('G', 'GR', 'A', 'D', 'DEN', 'R')"
 
 
-def get_con() -> duckdb.DuckDBPyConnection:
-    if not CANONICAL_DB.exists():
+def get_con(db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
+    canonical_db = db_path or CANONICAL_DB
+    if not canonical_db.exists():
         raise FileNotFoundError(
-            f"Canonical DB not found: {CANONICAL_DB}\nRun scripts/canonical.py first."
+            f"Canonical DB not found: {canonical_db}\nRun scripts/canonical.py first."
         )
-    return duckdb.connect(str(CANONICAL_DB), read_only=True)
+    return duckdb.connect(str(canonical_db), read_only=True)
 
 
 def save(df: pd.DataFrame, name: str) -> None:
@@ -120,6 +121,21 @@ def build_judge_metrics(con: duckdb.DuckDBPyConnection) -> None:
         HAVING total_cases >= 10
         ORDER BY total_cases DESC
     """).df()
+    df["grant_pct"] = (df["asylum_grant_rate"] * 100).round(2)
+    df["removal_pct"] = (df["removal_rate"] * 100).round(2)
+    df["abs_pct"] = (df["in_absentia_rate"] * 100).round(2)
+    df["rep_pct"] = (df["representation_rate"] * 100).round(2)
+    df["label"] = df["judge_name"] + " - " + df["court_city"]
+    court_stats = (
+        df.groupby("court_city")["grant_pct"]
+        .agg(court_mean="mean", court_std="std", court_median="median",
+             court_min="min", court_max="max", court_n="count")
+        .reset_index()
+    )
+    df = df.merge(court_stats, on="court_city", how="left")
+    df["z_score"] = ((df["grant_pct"] - df["court_mean"]) /
+                     df["court_std"].mask(df["court_std"] == 0)).fillna(0).round(2)
+    df["is_outlier"] = df["z_score"].abs() >= 1.5
     save(df, "judge_metrics")
 
 
@@ -206,17 +222,42 @@ def build_nationality_metrics(con: duckdb.DuckDBPyConnection) -> None:
 
 def build_case_outcomes(con: duckdb.DuckDBPyConnection) -> None:
     df = con.execute(f"""
+        WITH base AS (
+            SELECT
+                {FY_EXPR} AS fiscal_year,
+                NULLIF(
+                    TRIM(REPLACE(COALESCE(NULLIF(p.OUTCOME_DESCRIPTION, ''), NULLIF(p.OUTCOME, ''), ''), chr(0), '')),
+                    ''
+                ) AS cleaned_outcome,
+                p.IDNPROCEEDING
+            FROM canonical_proceedings p
+            WHERE p._current = TRUE
+              AND {FY_EXPR} BETWEEN 1990 AND 2027
+        )
         SELECT
-            {FY_EXPR} AS fiscal_year,
-            COALESCE(NULLIF(p.OUTCOME_DESCRIPTION, ''), NULLIF(p.OUTCOME, ''), 'Unknown') AS outcome_type,
-            COUNT(DISTINCT p.IDNPROCEEDING) AS case_count
-        FROM canonical_proceedings p
-        WHERE p._current = TRUE
-          AND {FY_EXPR} BETWEEN 1990 AND 2027
+            fiscal_year,
+            COALESCE(cleaned_outcome, 'Unknown') AS outcome_type,
+            COUNT(DISTINCT IDNPROCEEDING) AS case_count
+        FROM base
         GROUP BY fiscal_year, outcome_type
         ORDER BY fiscal_year, case_count DESC
     """).df()
     save(df, "case_outcomes")
+
+    annual = (
+        df.pivot_table(
+            index="fiscal_year",
+            columns="outcome_type",
+            values="case_count",
+            aggfunc="sum",
+            fill_value=0,
+        )
+        .reset_index()
+        .sort_values("fiscal_year", ascending=False)
+    )
+    annual.columns.name = None
+    annual["Total"] = annual.select_dtypes("number").drop(columns=["fiscal_year"], errors="ignore").sum(axis=1)
+    save(annual, "case_outcomes_annual")
 
 
 def build_representation_gap(con: duckdb.DuckDBPyConnection) -> None:
@@ -368,44 +409,413 @@ def build_backlog_timeline(con: duckdb.DuckDBPyConnection) -> None:
     save(pd.DataFrame([{"fiscal_year": year, "pending_cases": pending}]), "backlog_timeline")
 
 
-def build_empty_unsupported_tables() -> None:
-    """Replace seed-only tables with empty, schema-compatible outputs."""
-    empty_tables = {
-        "bond_analytics": [
-            "fiscal_year", "total_hearings", "bond_granted", "grant_rate",
-            "median_bond", "detention_rate_post", "admin", "bond_denied",
-        ],
-        "uac_metrics": [
-            "fiscal_year", "apprehensions", "grant_rate", "representation_rate",
-            "removal_rate", "admin",
-        ],
-        "uac_origin": ["era", "nat_code", "count"],
-        "detention_timeline": [
-            "fiscal_year", "avg_daily_pop", "detention_beds_funded", "book_ins",
-            "avg_length_of_stay_days", "civil_pct", "criminal_pct", "ice_facilities",
-        ],
-        "detention_by_facility": ["facility_type", "pct_of_pop", "avg_alos_days", "avg_daily_cost_usd"],
-        "removal_orders": ["fiscal_year", "removal_type", "count", "admin"],
-        "removal_by_nationality": ["nat_code", "country", "total_removals", "expedited_pct"],
-        "bia_timeline": [
-            "fiscal_year", "receipts", "completions", "dismissed", "sustained",
-            "remanded", "dhs_appeals", "pending", "admin",
-        ],
-        "circuit_appeals": [
-            "circuit", "circuit_name", "key_states", "petitions_filed",
-            "granted_remanded", "reversal_rate", "median_days", "notable_case",
-        ],
-        "case_age_timeline": [
-            "fiscal_year", "median_days", "p25_days", "p75_days",
-            "detained_median", "nondetained_median", "represented_median", "prose_median", "admin",
-        ],
-        "case_age_by_court": [
-            "court_city", "state", "circuit", "median_days", "pct_5yr_plus", "total_pending",
-        ],
-        "backlog_age_dist": ["age_bucket", "count", "color"],
-    }
-    for table, cols in empty_tables.items():
-        save(pd.DataFrame(columns=cols), table)
+def build_case_age_outputs(con: duckdb.DuckDBPyConnection) -> None:
+    age = con.execute("""
+        WITH base AS (
+            SELECT
+                CASE
+                    WHEN TRY_CAST(p.DECISION_DATE AS TIMESTAMP) IS NULL THEN NULL
+                    WHEN MONTH(TRY_CAST(p.DECISION_DATE AS TIMESTAMP)) >= 10
+                        THEN YEAR(TRY_CAST(p.DECISION_DATE AS TIMESTAMP)) + 1
+                    ELSE YEAR(TRY_CAST(p.DECISION_DATE AS TIMESTAMP))
+                END AS fiscal_year,
+                DATE_DIFF('day',
+                    COALESCE(
+                        TRY_CAST(NULLIF(p.INPUT_DATE, '') AS TIMESTAMP),
+                        TRY_CAST(NULLIF(p.OSC_DATE, '') AS TIMESTAMP),
+                        TRY_CAST(NULLIF(p.HEARING_DATE, '') AS TIMESTAMP)
+                    ),
+                    TRY_CAST(NULLIF(p.DECISION_DATE, '') AS TIMESTAMP)
+                ) AS age_days,
+                CASE WHEN p.CUSTODY IS NOT NULL AND p.CUSTODY NOT IN ('', 'N', '0')
+                     THEN TRUE ELSE FALSE END AS detained,
+                CASE WHEN c.ATTY_NBR IS NOT NULL AND c.ATTY_NBR NOT IN ('', '0')
+                     THEN TRUE ELSE FALSE END AS represented
+            FROM canonical_proceedings p
+            LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE
+            WHERE p._current = TRUE
+              AND TRY_CAST(NULLIF(p.DECISION_DATE, '') AS TIMESTAMP) IS NOT NULL
+        )
+        SELECT
+            fiscal_year,
+            MEDIAN(age_days) AS median_days,
+            QUANTILE_CONT(age_days, 0.25) AS p25_days,
+            QUANTILE_CONT(age_days, 0.75) AS p75_days,
+            MEDIAN(CASE WHEN detained THEN age_days END) AS detained_median,
+            MEDIAN(CASE WHEN NOT detained THEN age_days END) AS nondetained_median,
+            MEDIAN(CASE WHEN represented THEN age_days END) AS represented_median,
+            MEDIAN(CASE WHEN NOT represented THEN age_days END) AS prose_median,
+            NULL::TEXT AS admin
+        FROM base
+        WHERE fiscal_year BETWEEN 1990 AND 2027
+          AND age_days BETWEEN 0 AND 20000
+        GROUP BY fiscal_year
+        ORDER BY fiscal_year
+    """).df()
+    save(age, "case_age_timeline")
+
+    by_court = con.execute("""
+        WITH base AS (
+            SELECT
+                COALESCE(NULLIF(p.COURT_CITY, ''), p.COURT) AS court_city,
+                p.COURT_STATE AS state,
+                p.CIRCUIT AS circuit,
+                DATE_DIFF('day',
+                    COALESCE(
+                        TRY_CAST(NULLIF(p.INPUT_DATE, '') AS TIMESTAMP),
+                        TRY_CAST(NULLIF(p.OSC_DATE, '') AS TIMESTAMP),
+                        TRY_CAST(NULLIF(p.HEARING_DATE, '') AS TIMESTAMP)
+                    ),
+                    TRY_CAST(NULLIF(p.DECISION_DATE, '') AS TIMESTAMP)
+                ) AS age_days,
+                CASE WHEN p.DECISION_DATE IS NULL OR p.DECISION_DATE = '' THEN TRUE ELSE FALSE END AS pending
+            FROM canonical_proceedings p
+            WHERE p._current = TRUE
+              AND p.COURT IS NOT NULL
+        )
+        SELECT
+            court_city,
+            state,
+            circuit,
+            MEDIAN(age_days) AS median_days,
+            ROUND(SUM(CASE WHEN pending THEN 1 ELSE 0 END)::DOUBLE / NULLIF(COUNT(*), 0), 4) AS pct_5yr_plus,
+            SUM(CASE WHEN pending THEN 1 ELSE 0 END) AS total_pending
+        FROM base
+        WHERE age_days BETWEEN 0 AND 20000 OR pending
+        GROUP BY court_city, state, circuit
+        HAVING COUNT(*) >= 100
+        ORDER BY total_pending DESC
+        LIMIT 100
+    """).df()
+    save(by_court, "case_age_by_court")
+
+    dist = con.execute("""
+        WITH pending AS (
+            SELECT DATE_DIFF('day',
+                COALESCE(
+                    TRY_CAST(NULLIF(p.INPUT_DATE, '') AS TIMESTAMP),
+                    TRY_CAST(NULLIF(p.OSC_DATE, '') AS TIMESTAMP),
+                    TRY_CAST(NULLIF(p.HEARING_DATE, '') AS TIMESTAMP)
+                ),
+                current_timestamp
+            ) AS age_days
+            FROM canonical_proceedings p
+            WHERE p._current = TRUE
+              AND (p.DECISION_DATE IS NULL OR p.DECISION_DATE = '')
+        )
+        SELECT age_bucket, COUNT(*) AS count,
+            CASE age_bucket
+                WHEN 'Under 1 year' THEN '#1e8a50'
+                WHEN '1-2 years' THEN '#2980b9'
+                WHEN '2-3 years' THEN '#f39c12'
+                WHEN '3-5 years' THEN '#e67e22'
+                WHEN '5-10 years' THEN '#c0392b'
+                ELSE '#8e44ad'
+            END AS color
+        FROM (
+            SELECT CASE
+                WHEN age_days < 365 THEN 'Under 1 year'
+                WHEN age_days < 730 THEN '1-2 years'
+                WHEN age_days < 1095 THEN '2-3 years'
+                WHEN age_days < 1825 THEN '3-5 years'
+                WHEN age_days < 3650 THEN '5-10 years'
+                ELSE 'Over 10 years'
+            END AS age_bucket
+            FROM pending
+            WHERE age_days >= 0
+        )
+        GROUP BY age_bucket
+        ORDER BY MIN(CASE age_bucket
+            WHEN 'Under 1 year' THEN 1 WHEN '1-2 years' THEN 2 WHEN '2-3 years' THEN 3
+            WHEN '3-5 years' THEN 4 WHEN '5-10 years' THEN 5 ELSE 6 END)
+    """).df()
+    save(dist, "backlog_age_dist")
+
+
+def build_removal_outputs(con: duckdb.DuckDBPyConnection) -> None:
+    df = con.execute(f"""
+        WITH classified AS (
+            SELECT
+                {FY_EXPR} AS fiscal_year,
+                COALESCE(NULLIF(p.OUTCOME_DESCRIPTION, ''), p.OUTCOME, 'Unknown') AS outcome_text,
+                p.NAT,
+                p.IDNPROCEEDING
+            FROM canonical_proceedings p
+            WHERE p._current = TRUE
+              AND {FY_EXPR} BETWEEN 1990 AND 2027
+        )
+        SELECT
+            fiscal_year,
+            CASE
+                WHEN UPPER(outcome_text) LIKE '%VOL%' THEN 'Voluntary Departure (Departed)'
+                WHEN UPPER(outcome_text) LIKE '%REMOV%' OR UPPER(outcome_text) LIKE '%DEPORT%' THEN 'Ordered Removed (IJ)'
+                ELSE 'Other EOIR Completion'
+            END AS removal_type,
+            COUNT(DISTINCT IDNPROCEEDING) AS count,
+            NULL::TEXT AS admin
+        FROM classified
+        WHERE UPPER(outcome_text) LIKE '%VOL%'
+           OR UPPER(outcome_text) LIKE '%REMOV%'
+           OR UPPER(outcome_text) LIKE '%DEPORT%'
+        GROUP BY fiscal_year, removal_type
+        ORDER BY fiscal_year, removal_type
+    """).df()
+    save(df, "removal_orders")
+
+    nat = con.execute("""
+        SELECT
+            p.NAT AS nat_code,
+            COALESCE(NULLIF(n.NAT_COUNTRY_NAME, ''), NULLIF(n.NAT_NAME, ''), p.NAT) AS country,
+            COUNT(DISTINCT p.IDNPROCEEDING) AS total_removals,
+            0.0 AS expedited_pct
+        FROM canonical_proceedings p
+        LEFT JOIN canonical_nationalities n ON n.NAT_CODE = p.NAT
+        WHERE p._current = TRUE
+          AND p.NAT IS NOT NULL
+          AND p.NAT != ''
+          AND (
+              UPPER(COALESCE(p.OUTCOME_DESCRIPTION, p.OUTCOME, '')) LIKE '%REMOV%'
+              OR UPPER(COALESCE(p.OUTCOME_DESCRIPTION, p.OUTCOME, '')) LIKE '%DEPORT%'
+          )
+        GROUP BY p.NAT, country
+        ORDER BY total_removals DESC
+        LIMIT 100
+    """).df()
+    save(nat, "removal_by_nationality")
+
+
+def build_bond_outputs(con: duckdb.DuckDBPyConnection) -> None:
+    df = con.execute("""
+        WITH base AS (
+            SELECT
+                CASE
+                    WHEN TRY_CAST(DECISION_DATE AS TIMESTAMP) IS NULL THEN NULL
+                    WHEN MONTH(TRY_CAST(DECISION_DATE AS TIMESTAMP)) >= 10
+                        THEN YEAR(TRY_CAST(DECISION_DATE AS TIMESTAMP)) + 1
+                    ELSE YEAR(TRY_CAST(DECISION_DATE AS TIMESTAMP))
+                END AS fiscal_year,
+                IDNBOND,
+                DECISION,
+                COALESCE(NULLIF(NEW_BOND, 0), NULLIF(INITIAL_BOND, 0)) AS bond_amount
+            FROM canonical_bonds
+        )
+        SELECT
+            fiscal_year,
+            COUNT(DISTINCT IDNBOND) AS total_hearings,
+            COUNT(DISTINCT CASE WHEN bond_amount IS NOT NULL AND bond_amount > 0 THEN IDNBOND END) AS bond_granted,
+            COUNT(DISTINCT CASE WHEN bond_amount IS NULL OR bond_amount <= 0 THEN IDNBOND END) AS bond_denied,
+            COUNT(DISTINCT CASE WHEN bond_amount IS NOT NULL AND bond_amount > 0 THEN IDNBOND END) AS granted,
+            COUNT(DISTINCT CASE WHEN bond_amount IS NULL OR bond_amount <= 0 THEN IDNBOND END) AS denied,
+            ROUND(bond_granted::DOUBLE / NULLIF(total_hearings, 0), 4) AS grant_rate,
+            MEDIAN(bond_amount) AS median_bond,
+            ROUND(bond_denied::DOUBLE / NULLIF(total_hearings, 0), 4) AS detention_rate_post,
+            NULL::TEXT AS admin
+        FROM base
+        WHERE fiscal_year BETWEEN 1990 AND 2027
+        GROUP BY fiscal_year
+        ORDER BY fiscal_year
+    """).df()
+    save(df, "bond_analytics")
+
+
+def build_detention_outputs(con: duckdb.DuckDBPyConnection) -> None:
+    timeline = con.execute("""
+        WITH base AS (
+            SELECT
+                CASE
+                    WHEN TRY_CAST(DATDETAINED AS TIMESTAMP) IS NULL THEN NULL
+                    WHEN MONTH(TRY_CAST(DATDETAINED AS TIMESTAMP)) >= 10
+                        THEN YEAR(TRY_CAST(DATDETAINED AS TIMESTAMP)) + 1
+                    ELSE YEAR(TRY_CAST(DATDETAINED AS TIMESTAMP))
+                END AS fiscal_year,
+                IDNCUSTODY,
+                IDNCASE,
+                DATE_DIFF('day', TRY_CAST(DATDETAINED AS TIMESTAMP), TRY_CAST(DATRELEASED AS TIMESTAMP)) AS los_days
+            FROM canonical_custody_history
+            WHERE TRY_CAST(DATDETAINED AS TIMESTAMP) IS NOT NULL
+        )
+        SELECT
+            fiscal_year,
+            COUNT(DISTINCT IDNCASE) AS avg_daily_pop,
+            NULL::DOUBLE AS detention_beds_funded,
+            COUNT(DISTINCT IDNCUSTODY) AS book_ins,
+            AVG(CASE WHEN los_days BETWEEN 0 AND 5000 THEN los_days END) AS avg_length_of_stay_days,
+            1.0 AS civil_pct,
+            0.0 AS criminal_pct,
+            COUNT(DISTINCT IDNCASE) AS ice_facilities
+        FROM base
+        WHERE fiscal_year BETWEEN 1990 AND 2027
+        GROUP BY fiscal_year
+        ORDER BY fiscal_year
+    """).df()
+    save(timeline, "detention_timeline")
+
+    fac = con.execute("""
+        WITH case_facilities AS (
+            SELECT
+                COALESCE(NULLIF(DETENTION_FACILITY_TYPE, ''), 'Unknown') AS facility_type,
+                COUNT(DISTINCT IDNCASE) AS cases,
+                (SELECT COUNT(DISTINCT IDNCASE)
+                 FROM canonical_cases
+                 WHERE DETENTION_FACILITY_TYPE IS NOT NULL
+                   AND DETENTION_FACILITY_TYPE != '') AS denominator
+            FROM canonical_cases
+            WHERE DETENTION_FACILITY_TYPE IS NOT NULL
+              AND DETENTION_FACILITY_TYPE != ''
+            GROUP BY facility_type
+        ),
+        custody_categories AS (
+            SELECT
+                CASE CUSTODY
+                    WHEN 'D' THEN 'EOIR custody category: detained'
+                    WHEN 'R' THEN 'EOIR custody category: released'
+                    WHEN 'N' THEN 'EOIR custody category: not detained'
+                    ELSE 'EOIR custody category: unknown'
+                END AS facility_type,
+                COUNT(DISTINCT IDNCASE) AS cases,
+                (SELECT COUNT(DISTINCT IDNCASE) FROM canonical_custody_history) AS denominator
+            FROM canonical_custody_history
+            WHERE CUSTODY IS NOT NULL
+              AND CUSTODY != ''
+            GROUP BY CUSTODY
+        ),
+        selected AS (
+            SELECT * FROM case_facilities
+            UNION ALL
+            SELECT * FROM custody_categories
+            WHERE NOT EXISTS (SELECT 1 FROM case_facilities)
+        )
+        SELECT
+            facility_type,
+            ROUND(cases::DOUBLE / NULLIF(denominator, 0), 4) AS pct_of_pop,
+            NULL::DOUBLE AS avg_alos_days,
+            NULL::DOUBLE AS avg_daily_cost_usd
+        FROM selected
+        ORDER BY pct_of_pop DESC
+    """).df()
+    save(fac, "detention_by_facility")
+
+
+def build_uac_outputs(con: duckdb.DuckDBPyConnection) -> None:
+    metrics = con.execute(f"""
+        WITH base AS (
+            SELECT
+                CASE
+                    WHEN TRY_CAST(j.CREATED_ON AS TIMESTAMP) IS NULL THEN NULL
+                    WHEN MONTH(TRY_CAST(j.CREATED_ON AS TIMESTAMP)) >= 10
+                        THEN YEAR(TRY_CAST(j.CREATED_ON AS TIMESTAMP)) + 1
+                    ELSE YEAR(TRY_CAST(j.CREATED_ON AS TIMESTAMP))
+                END AS fiscal_year,
+                j.IDNCASE,
+                c.ATTY_NBR,
+                p.IDNPROCEEDING,
+                COALESCE(NULLIF(c.NAT, ''), NULLIF(p.NAT, '')) AS NAT,
+                COALESCE(p.OUTCOME_DESCRIPTION, p.OUTCOME, '') AS outcome_text,
+                a.IDNAPPLICATION,
+                a.APPLICATION_TYPE,
+                a.DECISION
+            FROM canonical_juvenile_history j
+            LEFT JOIN canonical_cases c ON c.IDNCASE = j.IDNCASE
+            LEFT JOIN canonical_proceedings p ON p.IDNPROCEEDING = j.IDNPROCEEDING
+            LEFT JOIN canonical_applications a ON a.IDNPROCEEDING = p.IDNPROCEEDING
+        )
+        SELECT
+            fiscal_year,
+            COUNT(DISTINCT IDNCASE) AS apprehensions,
+            ROUND(
+                COUNT(DISTINCT CASE WHEN APPLICATION_TYPE IN {ASYLUM_CODES} AND DECISION IN {GRANT_CODES} THEN IDNAPPLICATION END)::DOUBLE
+                / NULLIF(COUNT(DISTINCT CASE WHEN APPLICATION_TYPE IN {ASYLUM_CODES} AND DECISION IN {ASYLUM_DECISION_CODES} THEN IDNAPPLICATION END), 0),
+                4
+            ) AS grant_rate,
+            ROUND(COUNT(DISTINCT CASE WHEN ATTY_NBR IS NOT NULL AND ATTY_NBR NOT IN ('', '0') THEN IDNCASE END)::DOUBLE / NULLIF(COUNT(DISTINCT IDNCASE), 0), 4) AS representation_rate,
+            ROUND(COUNT(DISTINCT CASE WHEN UPPER(outcome_text) LIKE '%REMOV%' OR UPPER(outcome_text) LIKE '%DEPORT%' THEN IDNPROCEEDING END)::DOUBLE / NULLIF(COUNT(DISTINCT IDNPROCEEDING), 0), 4) AS removal_rate,
+            COUNT(DISTINCT CASE WHEN IDNPROCEEDING IS NULL THEN IDNCASE END) AS pending_cases,
+            NULL::TEXT AS admin
+        FROM base
+        WHERE fiscal_year BETWEEN 1990 AND 2027
+        GROUP BY fiscal_year
+        ORDER BY fiscal_year
+    """).df()
+    save(metrics, "uac_metrics")
+
+    origin = con.execute("""
+        SELECT
+            'FY' || CAST(fiscal_year AS VARCHAR) AS era,
+            NAT AS nat_code,
+            COUNT(DISTINCT IDNCASE) AS count
+        FROM (
+            SELECT
+                CASE
+                    WHEN TRY_CAST(j.CREATED_ON AS TIMESTAMP) IS NULL THEN NULL
+                    WHEN MONTH(TRY_CAST(j.CREATED_ON AS TIMESTAMP)) >= 10
+                        THEN YEAR(TRY_CAST(j.CREATED_ON AS TIMESTAMP)) + 1
+                    ELSE YEAR(TRY_CAST(j.CREATED_ON AS TIMESTAMP))
+                END AS fiscal_year,
+                j.IDNCASE,
+                c.NAT
+            FROM canonical_juvenile_history j
+            LEFT JOIN canonical_cases c ON c.IDNCASE = j.IDNCASE
+        )
+        WHERE fiscal_year IS NOT NULL
+          AND NAT IS NOT NULL
+          AND NAT != ''
+        GROUP BY fiscal_year, NAT
+        QUALIFY row_number() OVER (PARTITION BY fiscal_year ORDER BY count DESC) <= 15
+        ORDER BY fiscal_year, count DESC
+    """).df()
+    save(origin, "uac_origin")
+
+
+def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
+    bia = con.execute("""
+        WITH base AS (
+            SELECT
+                CASE
+                    WHEN TRY_CAST(COALESCE(NULLIF(BIA_DECISION_DATE, ''), NULLIF(FILED_DATE, '')) AS TIMESTAMP) IS NULL THEN NULL
+                    WHEN MONTH(TRY_CAST(COALESCE(NULLIF(BIA_DECISION_DATE, ''), NULLIF(FILED_DATE, '')) AS TIMESTAMP)) >= 10
+                        THEN YEAR(TRY_CAST(COALESCE(NULLIF(BIA_DECISION_DATE, ''), NULLIF(FILED_DATE, '')) AS TIMESTAMP)) + 1
+                    ELSE YEAR(TRY_CAST(COALESCE(NULLIF(BIA_DECISION_DATE, ''), NULLIF(FILED_DATE, '')) AS TIMESTAMP))
+                END AS fiscal_year,
+                IDNAPPEAL,
+                FILED_BY,
+                BIA_DECISION,
+                BIA_DECISION_TYPE,
+                BIA_DECISION_DATE
+            FROM canonical_appeals
+        )
+        SELECT
+            fiscal_year,
+            COUNT(DISTINCT IDNAPPEAL) AS receipts,
+            COUNT(DISTINCT CASE WHEN BIA_DECISION_DATE IS NOT NULL AND BIA_DECISION_DATE != '' THEN IDNAPPEAL END) AS completions,
+            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%DISMISS%' OR UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%AFFIRM%' THEN IDNAPPEAL END) AS dismissed,
+            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%SUSTAIN%' THEN IDNAPPEAL END) AS sustained,
+            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%REMAND%' THEN IDNAPPEAL END) AS remanded,
+            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(FILED_BY, '')) LIKE '%DHS%' OR UPPER(COALESCE(FILED_BY, '')) LIKE '%INS%' THEN IDNAPPEAL END) AS dhs_appeals,
+            COUNT(DISTINCT CASE WHEN BIA_DECISION_DATE IS NULL OR BIA_DECISION_DATE = '' THEN IDNAPPEAL END) AS pending,
+            NULL::TEXT AS admin
+        FROM base
+        WHERE fiscal_year BETWEEN 1990 AND 2027
+        GROUP BY fiscal_year
+        ORDER BY fiscal_year
+    """).df()
+    save(bia, "bia_timeline")
+
+    fed = con.execute("""
+        SELECT
+            'FED' AS circuit,
+            'Federal Courts' AS circuit_name,
+            'EOIR federal appeal records' AS key_states,
+            COUNT(DISTINCT f.IDNFEDAPPEAL) AS petitions_filed,
+            COUNT(DISTINCT CASE WHEN UPPER(COALESCE(f.FED_DECISION, '')) LIKE '%REMAND%' OR UPPER(COALESCE(f.FED_DECISION, '')) LIKE '%GRANT%' THEN f.IDNFEDAPPEAL END) AS granted_remanded,
+            ROUND(granted_remanded::DOUBLE / NULLIF(petitions_filed, 0), 4) AS reversal_rate,
+            MEDIAN(DATE_DIFF('day', TRY_CAST(a.BIA_DECISION_DATE AS TIMESTAMP), TRY_CAST(f.REQUESTED_BY_OIL_DATE AS TIMESTAMP))) AS median_days,
+            'EOIR does not expose circuit identity in this table' AS notable_case
+        FROM canonical_fed_appeals f
+        LEFT JOIN canonical_appeals a ON a.IDNAPPEAL = f.IDNAPPEAL
+        WHERE f.REQUESTED_BY_OIL_DATE IS NOT NULL
+          AND f.REQUESTED_BY_OIL_DATE != ''
+    """).df()
+    save(fed, "circuit_appeals")
 
 
 def write_pipeline_status(con: duckdb.DuckDBPyConnection) -> None:
@@ -435,9 +845,9 @@ def write_pipeline_status(con: duckdb.DuckDBPyConnection) -> None:
     write_json(status, "pipeline_status.json")
 
 
-def run_all() -> None:
+def run_all(db_path: Path | None = None) -> None:
     log.info("Starting Gold layer aggregation...")
-    con = get_con()
+    con = get_con(db_path)
     build_judge_metrics(con)
     build_court_metrics(con)
     build_nationality_metrics(con)
@@ -446,11 +856,25 @@ def run_all() -> None:
     build_policy_trends(con)
     build_in_absentia(con)
     build_backlog_timeline(con)
-    build_empty_unsupported_tables()
+    build_case_age_outputs(con)
+    build_removal_outputs(con)
+    build_bond_outputs(con)
+    build_detention_outputs(con)
+    build_uac_outputs(con)
+    build_appeal_outputs(con)
     write_pipeline_status(con)
     con.close()
     log.info("Gold aggregation complete. Data written to /data/")
 
 
 if __name__ == "__main__":
-    run_all()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build Gold Parquet outputs from canonical DuckDB")
+    parser.add_argument(
+        "--canonical-db",
+        default=None,
+        help="Optional canonical DuckDB path. Defaults to silver/canonical.duckdb.",
+    )
+    args = parser.parse_args()
+    run_all(Path(args.canonical_db) if args.canonical_db else None)

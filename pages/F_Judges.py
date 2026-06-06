@@ -10,7 +10,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
@@ -42,33 +41,43 @@ raw_df = load_judge_metrics()
 if raw_df is None or raw_df.empty:
     no_data_banner()
 else:
-    # ── Derived columns (used by all tabs) ────────────────────────────────────
+    # ── Precomputed columns are written by scripts/aggregate.py. The fallback
+    # keeps older data files usable if someone has not rebuilt yet.
     df = raw_df.copy()
-    df["grant_pct"]   = (df["asylum_grant_rate"] * 100).round(2)
-    df["removal_pct"] = (df["removal_rate"]       * 100).round(2)
-    df["abs_pct"]     = (df["in_absentia_rate"]   * 100).round(2)
-    df["rep_pct"]     = (df["representation_rate"]* 100).round(2)
-    df["label"]       = df["judge_name"] + " — " + df["court_city"]
-
-    court_stats = (
-        df.groupby("court_city")["grant_pct"]
-        .agg(court_mean="mean", court_std="std", court_median="median",
-             court_min="min", court_max="max", court_n="count")
-        .reset_index()
-    )
-    df = df.merge(court_stats, on="court_city", how="left")
-    df["z_score"]    = ((df["grant_pct"] - df["court_mean"]) /
-                        df["court_std"].replace(0, np.nan)).fillna(0).round(2)
-    df["is_outlier"] = df["z_score"].abs() >= 1.5
+    if "grant_pct" not in df.columns:
+        df["grant_pct"] = (df["asylum_grant_rate"] * 100).round(2)
+    if "removal_pct" not in df.columns:
+        df["removal_pct"] = (df["removal_rate"] * 100).round(2)
+    if "abs_pct" not in df.columns:
+        df["abs_pct"] = (df["in_absentia_rate"] * 100).round(2)
+    if "rep_pct" not in df.columns:
+        df["rep_pct"] = (df["representation_rate"] * 100).round(2)
+    if "label" not in df.columns:
+        df["label"] = df["judge_name"] + " - " + df["court_city"]
+    if not {"court_mean", "court_std", "z_score", "is_outlier"}.issubset(df.columns):
+        court_stats = (
+            df.groupby("court_city")["grant_pct"]
+            .agg(court_mean="mean", court_std="std", court_median="median",
+                 court_min="min", court_max="max", court_n="count")
+            .reset_index()
+        )
+        df = df.merge(court_stats, on="court_city", how="left")
+        df["z_score"] = ((df["grant_pct"] - df["court_mean"]) /
+                         df["court_std"].mask(df["court_std"] == 0)).fillna(0).round(2)
+        df["is_outlier"] = df["z_score"].abs() >= 1.5
 
     # ── Shared sidebar filters ────────────────────────────────────────────────
     st.sidebar.markdown("### Judge Filters")
     circuits_avail = sorted(df["circuit"].dropna().unique())
     sel_circuits = st.sidebar.multiselect("Circuit", circuits_avail,
-                                           default=circuits_avail, key="j_circuits")
-    courts_avail = sorted(df[df["circuit"].isin(sel_circuits)]["court_city"].dropna().unique())
+                                           default=[], key="j_circuits",
+                                           placeholder="All circuits")
+    active_circuits = sel_circuits or circuits_avail
+    courts_avail = sorted(df[df["circuit"].isin(active_circuits)]["court_city"].dropna().unique())
     sel_courts   = st.sidebar.multiselect("Court", courts_avail,
-                                           default=courts_avail, key="j_courts")
+                                           default=[], key="j_courts",
+                                           placeholder="All courts")
+    active_courts = sel_courts or courts_avail
     min_cases_sb = st.sidebar.slider("Min total cases", 0,
                                      int(df["total_cases"].max()), 0,
                                      step=50, key="j_min_cases")
@@ -76,8 +85,8 @@ else:
                                      step=1, key="j_grant_range")
 
     fdf = df[
-        df["circuit"].isin(sel_circuits)
-        & df["court_city"].isin(sel_courts)
+        df["circuit"].isin(active_circuits)
+        & df["court_city"].isin(active_courts)
         & (df["total_cases"] >= min_cases_sb)
         & (df["grant_pct"] >= grant_range[0])
         & (df["grant_pct"] <= grant_range[1])
@@ -290,9 +299,14 @@ most well-documented and least-justified disparities in the U.S. legal system.
         # Distribution by court
         with pt1:
             st.subheader("Grant Rate Distribution Within Each Court")
-            st.caption("Wide boxes = high variance = unpredictable outcomes for respondents.")
+            st.caption("Wide boxes = high variance = unpredictable outcomes for respondents. Showing the 50 largest visible courts for speed.")
+            top_courts = (
+                fdf.groupby("court_city")["judge_name"]
+                .count().sort_values(ascending=False).head(50).index
+            )
+            box_source = fdf[fdf["court_city"].isin(top_courts)].copy()
             courts_ordered = (
-                fdf.groupby("court_city")["grant_pct"]
+                box_source.groupby("court_city")["grant_pct"]
                 .median().sort_values(ascending=True).index.tolist()
             )
             circuit_colors = {
@@ -301,10 +315,10 @@ most well-documented and least-justified disparities in the U.S. legal system.
                 "7th": "#2c3e50", "8th": "#d35400", "9th": "#27ae60",
                 "10th": "#8e44ad", "11th": "#2980b9",
             }
-            circuit_by_court = fdf.groupby("court_city")["circuit"].first().to_dict()
+            circuit_by_court = box_source.groupby("court_city")["circuit"].first().to_dict()
             fig_box = go.Figure()
             for court in courts_ordered:
-                vals  = fdf[fdf["court_city"] == court]["grant_pct"].tolist()
+                vals  = box_source[box_source["court_city"] == court]["grant_pct"].tolist()
                 circ  = circuit_by_court.get(court, "?")
                 color = circuit_colors.get(circ, "#555")
                 fig_box.add_trace(go.Box(
@@ -321,7 +335,7 @@ most well-documented and least-justified disparities in the U.S. legal system.
             )
             st.plotly_chart(fig_box, width="stretch")
             tbl_box = (
-                fdf.groupby(["court_city", "circuit"]).agg(
+                box_source.groupby(["court_city", "circuit"]).agg(
                     Judges=("judge_name", "count"),
                     Median=("grant_pct", "median"),
                     Mean=("grant_pct", "mean"),
@@ -373,7 +387,6 @@ most well-documented and least-justified disparities in the U.S. legal system.
                 labels={scatter_x: axis_labels_p[scatter_x],
                         "grant_pct": "Asylum Grant Rate (%)", "court_city": "Court"},
                 symbol="is_outlier", symbol_map={True: "star", False: "circle"},
-                trendline="ols", trendline_color_override="#c0392b",
             )
             fig_scat.update_layout(height=480, legend=dict(orientation="h", y=-0.2),
                                    margin=dict(t=20, b=60))
@@ -399,7 +412,7 @@ most well-documented and least-justified disparities in the U.S. legal system.
                     std=("grant_pct", "std"),
                     n=("judge_name", "count"),
                     median=("grant_pct", "median"),
-                ).round(1).reset_index().sort_values("spread", ascending=False)
+                ).round(1).reset_index().sort_values("spread", ascending=False).head(50)
             )
             spread_df["color"] = spread_df["spread"].apply(
                 lambda v: "#c0392b" if v >= 40 else ("#e67e22" if v >= 25 else "#1e8a50")

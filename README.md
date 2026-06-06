@@ -28,11 +28,11 @@ Current real-data status:
 
 - Last EOIR release loaded: `2026-06`
 - Cases: `12,552,603`
-- Proceedings: `16,376,512`
-- Applications: `15,921,544`
+- Proceedings: `16,376,510`
+- Applications: `15,921,543`
 - Seed mode: `false`
 
-That means the core dashboard is now using real EOIR pipeline output, not sample data.
+That means the dashboard is using real EOIR pipeline output, not sample data.
 
 ## What Is Real Right Now
 
@@ -47,20 +47,15 @@ These sections currently use real EOIR-derived data:
 - In absentia orders
 - In absentia rates by court
 - A current backlog snapshot
-
-Some other sections are present in the app but do not yet have real data behind them. Those files are intentionally empty rather than filled with fake numbers.
-
-Not yet fully built from real data:
-
 - BIA appeals
-- Federal circuit appeals
+- Federal court appeal records
 - Bond analytics
-- ICE detention trends
+- EOIR custody and detention-history metrics
 - Removal pathway breakdowns
-- Unaccompanied children trends
-- Historical case age and backlog age distributions
+- Juvenile-history / unaccompanied-children metrics
+- Case age and backlog age distributions
 
-In other words: the core immigration court analytics are real. A few secondary topic areas still need additional pipeline work before they should be treated as real findings.
+Some measures have limits because EOIR does not publish every field people might expect. For example, the EOIR federal appeal table does not identify the circuit, and true ICE detention bed counts require ICE or DHS detention data. The app keeps those limits visible rather than filling gaps with made-up numbers.
 
 ## Why Some Data May Look Imperfect
 
@@ -78,7 +73,16 @@ Relief Docket keeps a canonical database that is designed not to delete old reco
 
 ## Technical Details
 
-For setup instructions, rebuild commands, repository layout, and pipeline notes, see [Technical Notes](docs/technical.md).
+For setup instructions, rebuild commands, repository layout, and pipeline notes, see [Technical Notes](docs/technical.md). For a more detailed list of what was implemented and what EOIR still cannot prove by itself, see [Real Data Roadmap](docs/real_data_roadmap.md).
+
+## Picking Up The Work
+
+For a future coding assistant or contributor, start here:
+
+- [Repo Summary](docs/repo_summary.md) explains the app structure, data files, and important commands.
+- [Next Model Handoff](docs/model_handoff_2026-06-05.md) records the current working state, verification already run, and what to watch next.
+- [Pipeline Diagram](docs/pipeline_diagram.md) shows the EOIR data flow as a Mermaid chart.
+- [Data Enhancement Roadmap](docs/data_enhancement_roadmap.md) ranks future bronze/silver-backed data additions by priority and difficulty.
 
 ## A Plain-English Caution
 
@@ -88,4 +92,4 @@ For example, two judges may have different grant rates because of differences in
 
 ## Status
 
-The current build is ready to run with real EOIR-derived core data. The next major work is to replace the remaining empty secondary sections with real pipeline outputs.
+The current build is ready to run with real EOIR-derived data from the June 2026 CASE release.

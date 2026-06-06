@@ -4,6 +4,8 @@
 
 This page is for people who want to understand or rebuild the data pipeline behind Relief Docket.
 
+For the detailed implementation status of the secondary real-data sections, see [Real Data Roadmap](real_data_roadmap.md).
+
 ## Running The App
 
 Create a virtual environment, install dependencies, and start Streamlit:
@@ -48,15 +50,15 @@ Current pipeline status:
 
 - Release tag: `2026-06`
 - Cases: `12,552,603`
-- Proceedings: `16,376,512`
-- Applications: `15,921,544`
+- Proceedings: `16,376,510`
+- Applications: `15,921,543`
 - Seed mode: `false`
 
 The app reads this status from `data/pipeline_status.json`.
 
 ## Core Tables
 
-The current real-data build uses the core tables needed for the dashboard:
+The current real-data build uses these EOIR tables for the dashboard:
 
 - `A_TblCase`
 - `B_TblProceeding`
@@ -66,8 +68,15 @@ The current real-data build uses the core tables needed for the dashboard:
 - `tblLookupCourtDecision`
 - `tblLookUp_Appln`
 - `tblLookupNationality`
+- `D_TblAssociatedBond`
+- `tbl_CustodyHistory`
+- `tbl_JuvenileHistory`
+- `tblAppeal`
+- `tblAppeal2`
+- `tblAppealFedCourts`
+- `tblThreeMbrReferrals`
 
-The ingest script defaults to the core table set. Use `--all` only when you need broader EOIR coverage.
+The ingest script defaults to this dashboard table set. Use `--all` only when you need broader EOIR coverage.
 
 ## Rebuild From EOIR
 
@@ -75,16 +84,18 @@ From the repository root:
 
 ```powershell
 python scripts\download.py
-python scripts\ingest.py --release 2026-06
-python scripts\canonical.py --release 2026-06
-python scripts\aggregate.py
+python scripts\ingest.py --release 2026-06 --db-path silver\2026-06.core2.duckdb
+python scripts\canonical.py --release 2026-06 --ingest-db silver\2026-06.core2.duckdb --canonical-db silver\canonical.roadmap3.duckdb
+python scripts\aggregate.py --canonical-db silver\canonical.roadmap3.duckdb
 ```
 
-If the default DuckDB file is locked by Dropbox, OneDrive, antivirus software, or another sync process, write to a separate ingest database:
+The explicit database paths keep the large generated DuckDB files separate from any default file that may be locked by Dropbox, OneDrive, antivirus software, or another sync process.
+
+For a simpler rebuild on a machine without file-locking issues, the same scripts can be run with their default paths:
 
 ```powershell
-python scripts\ingest.py --release 2026-06 --db-path silver\2026-06.core.duckdb
-python scripts\canonical.py --release 2026-06 --ingest-db silver\2026-06.core.duckdb
+python scripts\ingest.py --release 2026-06
+python scripts\canonical.py --release 2026-06
 python scripts\aggregate.py
 ```
 
@@ -145,21 +156,21 @@ The Streamlit app reads the small files in `data/`, including:
 - `policy_trends.parquet`
 - `in_absentia_timeline.parquet`
 - `in_absentia_by_court.parquet`
+- `bond_analytics.parquet`
+- `detention_timeline.parquet`
+- `detention_by_facility.parquet`
+- `uac_metrics.parquet`
+- `uac_origin.parquet`
+- `bia_timeline.parquet`
+- `circuit_appeals.parquet`
+- `case_age_timeline.parquet`
+- `case_age_by_court.parquet`
+- `backlog_age_dist.parquet`
+- `removal_orders.parquet`
+- `removal_by_nationality.parquet`
 - `pipeline_status.json`
 
-Some secondary topic files currently exist as empty schema-compatible Parquets. They are placeholders for future real pipeline work, not fake data.
-
-## Known Gaps
-
-The following areas still need dedicated real-data pipeline work:
-
-- BIA appeal metrics from appeal tables
-- federal circuit petition metrics
-- bond analytics from associated bond tables
-- detention trends from custody history and external ICE data
-- removal pathway breakdowns
-- unaccompanied child metrics
-- historical backlog and case-age distributions
+The committed Parquet files are generated from EOIR data, not seed data. Some measures remain limited by what EOIR publishes in the CASE release; see [Real Data Roadmap](real_data_roadmap.md) for those caveats.
 
 ## Git Notes
 

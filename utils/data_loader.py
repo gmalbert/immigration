@@ -123,6 +123,19 @@ def load_case_outcomes() -> Optional[pd.DataFrame]:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def load_case_outcomes_annual() -> Optional[pd.DataFrame]:
+    """Precomputed annual case outcome summary, wide by outcome type."""
+    path = _DATA / "case_outcomes_annual.parquet"
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except Exception as e:
+        log.warning("Failed loading case_outcomes_annual: %s", e)
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_backlog_timeline() -> Optional[pd.DataFrame]:
     """Pending caseload over time."""
     path = _DATA / "backlog_timeline.parquet"

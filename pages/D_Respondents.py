@@ -234,10 +234,12 @@ with tab_uac:
         if "pending_cases" in lu:
             uc3.metric("UAC Pending Cases", format_num(lu["pending_cases"]))
 
+        uac_min = int(uac_df["fiscal_year"].min())
+        uac_max = int(uac_df["fiscal_year"].max())
         uac_yr = st.slider("Fiscal Year Range",
-            min_value=int(uac_df["fiscal_year"].min()),
-            max_value=int(uac_df["fiscal_year"].max()),
-            value=(2010, int(uac_df["fiscal_year"].max())),
+            min_value=uac_min,
+            max_value=uac_max,
+            value=(max(2010, uac_min), uac_max),
             key="uac_yr_range")
         uac_f = uac_df[uac_df["fiscal_year"].between(uac_yr[0], uac_yr[1])].copy()
 
