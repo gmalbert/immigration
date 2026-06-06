@@ -231,16 +231,68 @@ with tab_age:
         pr = age_f.iloc[-2] if len(age_f) > 1 else la
         ratio = la["prose_median"] / la["represented_median"] if la["represented_median"] else 1
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"Median Case Length (FY{int(la['fiscal_year'])})",
-                  f"{la['median_days']/365:.1f} yrs ({int(la['median_days']):,}d)",
-                  delta=f"{int(la['median_days'] - pr['median_days']):+,}d",
-                  delta_color="inverse")
-        c2.metric("Non-Detained Median",
-                  f"{la['nondetained_median']/365:.1f} yrs ({int(la['nondetained_median']):,}d)")
-        c3.metric("Detained Median",
-                  f"{la['detained_median']/365:.1f} yrs ({int(la['detained_median']):,}d)")
-        c4.metric("Pro Se vs. Represented Ratio", f"{ratio:.1f}×", delta_color="off")
+        def fmt_days(days: float) -> str:
+            return f"{days / 365:.1f} yrs ({int(days):,}d)"
+
+        median_delta = int(la["median_days"] - pr["median_days"])
+        delta_class = "bad" if median_delta > 0 else "good" if median_delta < 0 else "neutral"
+        st.markdown(f"""
+        <style>
+        .case-age-metrics {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 0.75rem;
+            margin: 0.25rem 0 1.25rem;
+        }}
+        .case-age-card {{
+            border: 1px solid rgba(49, 51, 63, 0.18);
+            border-radius: 8px;
+            padding: 0.75rem 0.85rem;
+            background: #fff;
+            min-width: 0;
+        }}
+        .case-age-label {{
+            color: #555;
+            font-size: 0.82rem;
+            line-height: 1.15;
+            margin-bottom: 0.4rem;
+        }}
+        .case-age-value {{
+            color: #111;
+            font-size: clamp(1.05rem, 3.5vw, 1.45rem);
+            font-weight: 700;
+            line-height: 1.15;
+            overflow-wrap: anywhere;
+        }}
+        .case-age-delta {{
+            font-size: 0.88rem;
+            line-height: 1.2;
+            margin-top: 0.35rem;
+        }}
+        .case-age-delta.bad {{ color: #c0392b; }}
+        .case-age-delta.good {{ color: #1e8a50; }}
+        .case-age-delta.neutral {{ color: #666; }}
+        </style>
+        <div class="case-age-metrics">
+            <div class="case-age-card">
+                <div class="case-age-label">Median Case Length (FY{int(la['fiscal_year'])})</div>
+                <div class="case-age-value">{fmt_days(la['median_days'])}</div>
+                <div class="case-age-delta {delta_class}">{median_delta:+,}d</div>
+            </div>
+            <div class="case-age-card">
+                <div class="case-age-label">Non-Detained Median</div>
+                <div class="case-age-value">{fmt_days(la['nondetained_median'])}</div>
+            </div>
+            <div class="case-age-card">
+                <div class="case-age-label">Detained Median</div>
+                <div class="case-age-value">{fmt_days(la['detained_median'])}</div>
+            </div>
+            <div class="case-age-card">
+                <div class="case-age-label">Pro Se vs. Represented Ratio</div>
+                <div class="case-age-value">{ratio:.1f}×</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         at1, at2, at3, at4 = st.tabs([
             "📈 National Trend", "⚖️ Detained vs Non-Detained",
