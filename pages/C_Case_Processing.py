@@ -319,6 +319,7 @@ with tab_age:
                               hovermode="x unified", height=420, margin=dict(t=60, b=40))
             fig = _add_admin_bands(fig)
             st.plotly_chart(fig, width="stretch")
+            csv_download_button(age_df, "relief_docket_case_age_timeline.csv", key="age_dl")
 
         with at2:
             fig2 = go.Figure()
@@ -376,6 +377,8 @@ with tab_age:
                     height=max(380, len(crt) * 25 + 80),
                     margin=dict(l=160, r=100, t=40, b=40))
                 st.plotly_chart(fig4, width="stretch")
+                csv_download_button(court_age_df, "relief_docket_case_age_by_court.csv",
+                                    key="age_court_dl")
 
         with at4:
             if age_dist_df is None or age_dist_df.empty:
@@ -412,10 +415,5 @@ with tab_age:
                     "waiting 5+ years.",
                     icon="📅",
                 )
-
-        csv_download_button(age_df, "relief_docket_case_age_timeline.csv", key="age_dl")
-        if court_age_df is not None:
-            csv_download_button(court_age_df, "relief_docket_case_age_by_court.csv",
-                                key="age_court_dl")
 
 add_gavel_glimpse_footer()
