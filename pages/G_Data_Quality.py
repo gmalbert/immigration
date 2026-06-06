@@ -188,7 +188,7 @@ st.markdown("""
 st.caption(
     "Relief Docket is committed to publishing new diff logs with every monthly data update. "
     "If you find an anomaly or data quality issue not listed here, "
-    "please open an issue on GitHub."
+    "please [open an issue on GitHub](https://github.com/gmalbert/immigration/issues)."
 )
 
 add_gavel_glimpse_footer()
