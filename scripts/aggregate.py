@@ -266,7 +266,11 @@ def build_case_outcomes(con: duckdb.DuckDBPyConnection) -> None:
         )
         SELECT
             fiscal_year,
-            COALESCE(cleaned_outcome, 'Unknown') AS outcome_type,
+            CASE
+                WHEN cleaned_outcome IS NULL THEN 'Unknown'
+                WHEN cleaned_outcome IN ('2', 'D', 'E', 'G', 'O', 'R', 'V', 'X') THEN 'Unknown'
+                ELSE cleaned_outcome
+            END AS outcome_type,
             COUNT(DISTINCT IDNPROCEEDING) AS case_count
         FROM base
         GROUP BY fiscal_year, outcome_type
