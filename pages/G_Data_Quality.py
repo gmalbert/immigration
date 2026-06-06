@@ -110,34 +110,6 @@ for issue in sorted(KNOWN_ISSUES, key=lambda x: severity_order.get(x["severity"]
         if issue.get("sources"):
             st.caption("Sources: " + " · ".join(issue["sources"]))
 
-# ── Full pipeline instructions ────────────────────────────────────────────────
-st.markdown("---")
-st.markdown("### Running the Full Pipeline")
-st.markdown(
-    "To enable individual judge, court, and case-level analytics, "
-    "you need the full EOIR CASE database (~30GB uncompressed). "
-    "Here is the complete pipeline:"
-)
-st.code("""
-# Step 1: Download the latest EOIR monthly release from the FOIA library
-python scripts/download.py
-
-# Step 2: Load the raw tables into a DuckDB database
-python scripts/ingest.py --release 2026-05
-
-# Step 3 (optional): Diff against prior month for disappearing records
-python scripts/diff.py --prev 2026-04 --curr 2026-05
-
-# Step 4: Merge into the canonical Silver dataset (never deletes records)
-python scripts/canonical.py --release 2026-05
-
-# Step 5: Build Gold-layer Parquet files for the site
-python scripts/aggregate.py
-
-# Step 6: Restart the site
-streamlit run cases.py
-""", language="bash")
-
 # ── Diff log viewer ───────────────────────────────────────────────────────────
 diff_log_dir = ROOT / "silver" / "diff_log"
 if diff_log_dir.exists():
