@@ -164,8 +164,8 @@ In absentia orders can be reopened if the respondent can demonstrate they did no
                 hide_index=True,
                 height=500,
             )
-        csv_download_button(pol_df, "relief_docket_policy_trends.csv",
-                            key="pol_dl")
+            csv_download_button(pol_df, "relief_docket_policy_trends.csv",
+                                key="pol_dl")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2: APPEALS
@@ -243,6 +243,8 @@ with tab_appeals:
             )
             fig = _add_admin_bands(fig)
             st.plotly_chart(fig, width="stretch")
+            csv_download_button(bia_df, "relief_docket_bia_timeline.csv",
+                                key="app_bia_dl")
 
         with atab2:
             fig2 = go.Figure()
@@ -350,11 +352,7 @@ for review in the federal circuit courts after 2003.
                     tbl["median_days"] = tbl["median_days"].round(0).astype("Int64").astype(str)
                 from utils import clean_dataframe_columns
                 st.dataframe(clean_dataframe_columns(tbl), width="stretch", hide_index=True)
-
-        csv_download_button(bia_df, "relief_docket_bia_timeline.csv",
-                            key="app_bia_dl")
-        if circ_df is not None and not circ_df.empty:
-            csv_download_button(circ_df, "relief_docket_circuit_appeals.csv",
-                                key="app_circ_dl")
+                csv_download_button(circ_df, "relief_docket_circuit_appeals.csv",
+                                    key="app_circ_dl")
 
 add_gavel_glimpse_footer()
