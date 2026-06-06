@@ -175,14 +175,14 @@ st.markdown("### Data Sources & Further Reading")
 st.markdown("""
 | Source | What it provides | URL |
 |---|---|---|
-| EOIR FOIA Library | Raw monthly data downloads (primary source) | justice.gov/eoir/foia-library-0 |
-| TRAC Immigration | Cleaned EOIR analysis; 15+ years of diff tracking | tracreports.org |
-| Data.gov EOIR dataset | Mirrored with metadata | catalog.data.gov/dataset/eoir-case-data |
-| Vera Institute | Representation rates dashboard | vera.org |
-| Deportation Data Project | Processed EOIR data with codebook | deportationdata.org |
-| HuggingFace EOIR DuckDB | Pre-built queryable 164M-row database | huggingface.co/datasets/ian-nason/eoir-database |
-| EOIR Statistical Yearbook | Annual aggregate PDFs | justice.gov/eoir |
-| GAO Immigration Reports | Independent quality assessments | gao.gov |
+| EOIR FOIA Library | Raw monthly data downloads (primary source) | [justice.gov/eoir/foia-library-0](https://www.justice.gov/eoir/foia-library-0) |
+| TRAC Immigration | Cleaned EOIR analysis; 15+ years of diff tracking | [tracreports.org](https://tracreports.org) |
+| Data.gov EOIR dataset | Mirrored with metadata | [catalog.data.gov/dataset/eoir-case-data](https://catalog.data.gov/dataset/eoir-case-data) |
+| Vera Institute | Representation rates dashboard | [vera.org](https://www.vera.org) |
+| Deportation Data Project | Processed EOIR data with codebook | [deportationdata.org](https://deportationdata.org) |
+| HuggingFace EOIR DuckDB | Pre-built queryable 164M-row database | [huggingface.co/datasets/ian-nason/eoir-database](https://huggingface.co/datasets/ian-nason/eoir-database) |
+| EOIR Statistical Yearbook | Annual aggregate PDFs | [justice.gov/eoir](https://www.justice.gov/eoir) |
+| GAO Immigration Reports | Independent quality assessments | [gao.gov](https://www.gao.gov) |
 """)
 
 st.caption(
