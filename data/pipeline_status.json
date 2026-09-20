@@ -7,6 +7,6 @@
   "quality_warnings": 1,
   "deletion_count": 10830,
   "seed_mode": false,
-  "last_run": "2026-09-20T14:17:36.076724",
+  "last_run": "2026-09-20T15:25:06.670707",
   "note": "Gold data generated from the local EOIR CASE release via ingest -> canonical -> aggregate."
 }

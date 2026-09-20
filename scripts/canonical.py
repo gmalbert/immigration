@@ -336,6 +336,31 @@ def init_canonical(con: duckdb.DuckDBPyConnection) -> None:
         for col, col_type in columns.items():
             con.execute(f"ALTER TABLE {qident(table_name)} ADD COLUMN IF NOT EXISTS {qident(col)} {col_type}")
 
+    # Add a _current BOOLEAN column to every extended canonical table so
+    # downstream aggregators can filter to the latest snapshot with
+    # ``WHERE _current = TRUE`` — the same pattern used by
+    # canonical_cases / canonical_proceedings / canonical_applications
+    # (managed by _merge_table). Existing rows default to TRUE; rows from
+    # earlier releases are flipped to FALSE at the end of upsert_release.
+    for extended_table in (
+        "canonical_nationalities",
+        "canonical_bonds",
+        "canonical_custody_history",
+        "canonical_juvenile_history",
+        "canonical_appeals",
+        "canonical_fed_appeals",
+        "canonical_three_member_referrals",
+        "canonical_schedules",
+        "canonical_charges",
+        "canonical_rep_assignments",
+        "canonical_attorneys",
+        "canonical_motions",
+    ):
+        con.execute(
+            f"ALTER TABLE {qident(extended_table)} "
+            f"ADD COLUMN IF NOT EXISTS _current BOOLEAN DEFAULT TRUE"
+        )
+
     con.execute("""
         CREATE TABLE IF NOT EXISTS _release_log (
             release_tag            TEXT PRIMARY KEY,
@@ -1065,6 +1090,32 @@ def upsert_release(
     stats["case_count"] = con.execute("SELECT COUNT(*) FROM canonical_cases").fetchone()[0]
     stats["proceeding_count"] = con.execute("SELECT COUNT(*) FROM canonical_proceedings").fetchone()[0]
     stats["application_count"] = con.execute("SELECT COUNT(*) FROM canonical_applications").fetchone()[0]
+
+    # Mark rows from prior releases as _current=FALSE in extended canonical
+    # tables so downstream aggregators can use the same
+    # ``WHERE _current = TRUE`` filter that cases/proceedings/applications
+    # already support via _merge_table. Without this, INSERT-only tables
+    # (schedules, charges, rep_assignments, motions) accumulate one full
+    # snapshot per release and aggregate queries double-count.
+    for extended_table in (
+        "canonical_nationalities",
+        "canonical_bonds",
+        "canonical_custody_history",
+        "canonical_juvenile_history",
+        "canonical_appeals",
+        "canonical_fed_appeals",
+        "canonical_three_member_referrals",
+        "canonical_schedules",
+        "canonical_charges",
+        "canonical_rep_assignments",
+        "canonical_attorneys",
+        "canonical_motions",
+    ):
+        if extended_table in {row[0] for row in con.execute("SHOW TABLES").fetchall()}:
+            con.execute(
+                f"UPDATE {qident(extended_table)} SET _current = FALSE "
+                f"WHERE _last_seen_release != '{release_tag}'"
+            )
 
     con.execute(f"""
         INSERT OR REPLACE INTO _release_log

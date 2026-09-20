@@ -223,7 +223,7 @@ def build_nationality_metrics(con: duckdb.DuckDBPyConnection) -> None:
             FROM canonical_cases c
             LEFT JOIN canonical_proceedings p ON p.IDNCASE = c.IDNCASE
             LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = p.IDNPROCEEDING
-            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(c.NAT, ''), NULLIF(p.NAT, ''))
+            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(c.NAT, ''), NULLIF(p.NAT, '')) AND n._current = TRUE
             WHERE c._current = TRUE
         )
         SELECT
@@ -660,7 +660,7 @@ def build_removal_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT p.IDNPROCEEDING) AS total_removals,
             0.0 AS expedited_pct
         FROM canonical_proceedings p
-        LEFT JOIN canonical_nationalities n ON n.NAT_CODE = p.NAT
+        LEFT JOIN canonical_nationalities n ON n.NAT_CODE = p.NAT AND n._current = TRUE
         WHERE p._current = TRUE
           AND p.NAT IS NOT NULL
           AND p.NAT != ''
@@ -689,6 +689,7 @@ def build_bond_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 DECISION,
                 COALESCE(NULLIF(NEW_BOND, 0), NULLIF(INITIAL_BOND, 0)) AS bond_amount
             FROM canonical_bonds
+            WHERE _current = TRUE
         )
         SELECT
             fiscal_year,
@@ -724,7 +725,8 @@ def build_detention_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 IDNCASE,
                 DATE_DIFF('day', TRY_CAST(DATDETAINED AS TIMESTAMP), TRY_CAST(DATRELEASED AS TIMESTAMP)) AS los_days
             FROM canonical_custody_history
-            WHERE TRY_CAST(DATDETAINED AS TIMESTAMP) IS NOT NULL
+            WHERE _current = TRUE
+              AND TRY_CAST(DATDETAINED AS TIMESTAMP) IS NOT NULL
         )
         SELECT
             fiscal_year,
@@ -766,9 +768,10 @@ def build_detention_outputs(con: duckdb.DuckDBPyConnection) -> None:
                     ELSE 'EOIR custody category: unknown'
                 END AS facility_type,
                 COUNT(DISTINCT IDNCASE) AS cases,
-                (SELECT COUNT(DISTINCT IDNCASE) FROM canonical_custody_history) AS denominator
+                (SELECT COUNT(DISTINCT IDNCASE) FROM canonical_custody_history WHERE _current = TRUE) AS denominator
             FROM canonical_custody_history
-            WHERE CUSTODY IS NOT NULL
+            WHERE _current = TRUE
+              AND CUSTODY IS NOT NULL
               AND CUSTODY != ''
             GROUP BY CUSTODY
         ),
@@ -809,6 +812,7 @@ def build_uac_outputs(con: duckdb.DuckDBPyConnection) -> None:
             LEFT JOIN canonical_cases c ON c.IDNCASE = j.IDNCASE
             LEFT JOIN canonical_proceedings p ON p.IDNPROCEEDING = j.IDNPROCEEDING
             LEFT JOIN canonical_applications a ON a.IDNPROCEEDING = p.IDNPROCEEDING
+            WHERE j._current = TRUE
         )
         SELECT
             fiscal_year,
@@ -846,6 +850,7 @@ def build_uac_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 c.NAT
             FROM canonical_juvenile_history j
             LEFT JOIN canonical_cases c ON c.IDNCASE = j.IDNCASE
+            WHERE j._current = TRUE
         )
         WHERE fiscal_year IS NOT NULL
           AND NAT IS NOT NULL
@@ -872,6 +877,7 @@ def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 UPPER(TRIM(COALESCE(BIA_DECISION, ''))) AS DECISION_CODE,
                 BIA_DECISION_DATE
             FROM canonical_appeals
+            WHERE _current = TRUE
         )
         SELECT
             fiscal_year,
@@ -904,8 +910,9 @@ def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 TRY_CAST(a.BIA_DECISION_DATE AS TIMESTAMP) AS BIA_DECISION_TS,
                 TRY_CAST(f.REQUESTED_BY_OIL_DATE AS TIMESTAMP) AS REQUESTED_TS
             FROM canonical_fed_appeals f
-            LEFT JOIN canonical_appeals a ON a.IDNAPPEAL = f.IDNAPPEAL
-            WHERE f.REQUESTED_BY_OIL_DATE IS NOT NULL
+            LEFT JOIN canonical_appeals a ON a.IDNAPPEAL = f.IDNAPPEAL AND a._current = TRUE
+            WHERE f._current = TRUE
+              AND f.REQUESTED_BY_OIL_DATE IS NOT NULL
               AND f.REQUESTED_BY_OIL_DATE != ''
         )
         SELECT
@@ -1081,7 +1088,7 @@ def build_enhancement_trend_outputs(con: duckdb.DuckDBPyConnection) -> None:
                     / NULLIF(COUNT(DISTINCT py.IDNPROCEEDING), 0), 4) AS removal_rate
             FROM py
             LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = py.IDNPROCEEDING
-            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(py.proc_nat, ''), NULLIF(py.case_nat, ''))
+            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(py.proc_nat, ''), NULLIF(py.case_nat, '')) AND n._current = TRUE
             GROUP BY 2, 3
             HAVING nat_code IS NOT NULL AND nat_code != '' AND case_count >= 50
             ORDER BY case_count DESC
@@ -1165,7 +1172,7 @@ def build_representation_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
             FROM canonical_proceedings p
             LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE
             LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = p.IDNPROCEEDING
-            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(p.NAT, ''), NULLIF(c.NAT, ''))
+            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(p.NAT, ''), NULLIF(c.NAT, '')) AND n._current = TRUE
             WHERE p._current = TRUE
         )
         SELECT
@@ -1280,6 +1287,7 @@ def build_bond_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 COALESCE(NULLIF(COURT_CITY, ''), COURT) AS court_city,
                 COALESCE(NULLIF(NEW_BOND, 0), NULLIF(INITIAL_BOND, 0)) AS bond_amount
             FROM canonical_bonds
+            WHERE _current = TRUE
         )
     """
     by_year = con.execute(base_sql + """
@@ -1344,6 +1352,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 LAST_VALUE(CUSTODY) OVER (PARTITION BY IDNCASE ORDER BY TRY_CAST(NULLIF(DATDETAINED, '') AS TIMESTAMP) NULLS LAST, IDNCUSTODY ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_custody,
                 DATE_DIFF('day', TRY_CAST(NULLIF(DATDETAINED, '') AS TIMESTAMP), TRY_CAST(NULLIF(DATRELEASED, '') AS TIMESTAMP)) AS detention_days
             FROM canonical_custody_history
+            WHERE _current = TRUE
         )
         SELECT
             COALESCE(first_custody, 'Unknown') AS first_custody,
@@ -1368,6 +1377,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%SUSTAIN%' THEN IDNAPPEAL END) AS sustained,
             COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%DISMISS%' OR UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%AFFIRM%' THEN IDNAPPEAL END) AS dismissed_or_affirmed
         FROM canonical_appeals
+        WHERE _current = TRUE
         GROUP BY appeal_category, appeal_type, filed_by, decision_group
         HAVING appeals >= 20
         ORDER BY appeals DESC
@@ -1390,6 +1400,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 IDNSCHEDULE,
                 IDNPROCEEDING
             FROM canonical_schedules
+            WHERE _current = TRUE
         )
         SELECT
             fiscal_year,
@@ -1414,6 +1425,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT IDNPROCEEDING) AS proceedings,
             AVG(CASE WHEN TRY_CAST(ADJ_ELAP_DAYS AS DOUBLE) BETWEEN 0 AND 5000 THEN TRY_CAST(ADJ_ELAP_DAYS AS DOUBLE) END) AS avg_elapsed_days
         FROM canonical_schedules
+        WHERE _current = TRUE
         GROUP BY adjournment_reason
         HAVING hearings >= 100
         ORDER BY hearings DESC
@@ -1428,6 +1440,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT IDNPROCEEDING) AS proceedings,
             COUNT(DISTINCT IDNCASE) AS cases
         FROM canonical_charges
+        WHERE _current = TRUE
         GROUP BY charge, charge_status
         HAVING charge_records >= 100
         ORDER BY charge_records DESC
@@ -1440,7 +1453,8 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 COALESCE(NULLIF(CHARGE, ''), 'Unknown') AS charge,
                 IDNPROCEEDING
             FROM canonical_charges
-            WHERE IDNPROCEEDING IS NOT NULL
+            WHERE _current = TRUE
+              AND IDNPROCEEDING IS NOT NULL
               AND IDNPROCEEDING != ''
             GROUP BY 1, 2
         ),
@@ -1478,6 +1492,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 IDNMOTION,
                 IDNPROCEEDING
             FROM canonical_motions
+            WHERE _current = TRUE
         )
         SELECT
             fiscal_year,
@@ -1509,6 +1524,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 IDNREPASSIGNMENT,
                 IDNCASE
             FROM canonical_rep_assignments
+            WHERE _current = TRUE
         )
         SELECT
             fiscal_year,
@@ -1564,11 +1580,11 @@ def build_quality_and_snapshot_outputs(con: duckdb.DuckDBPyConnection) -> None:
         "cases": con.execute("SELECT COUNT(*) FROM canonical_cases").fetchone()[0],
         "proceedings": con.execute("SELECT COUNT(*) FROM canonical_proceedings").fetchone()[0],
         "applications": con.execute("SELECT COUNT(*) FROM canonical_applications").fetchone()[0],
-        "bonds": con.execute("SELECT COUNT(*) FROM canonical_bonds").fetchone()[0],
-        "custody_history": con.execute("SELECT COUNT(*) FROM canonical_custody_history").fetchone()[0],
-        "schedules": con.execute("SELECT COUNT(*) FROM canonical_schedules").fetchone()[0],
-        "charges": con.execute("SELECT COUNT(*) FROM canonical_charges").fetchone()[0],
-        "motions": con.execute("SELECT COUNT(*) FROM canonical_motions").fetchone()[0],
+        "bonds": con.execute("SELECT COUNT(*) FROM canonical_bonds WHERE _current = TRUE").fetchone()[0],
+        "custody_history": con.execute("SELECT COUNT(*) FROM canonical_custody_history WHERE _current = TRUE").fetchone()[0],
+        "schedules": con.execute("SELECT COUNT(*) FROM canonical_schedules WHERE _current = TRUE").fetchone()[0],
+        "charges": con.execute("SELECT COUNT(*) FROM canonical_charges WHERE _current = TRUE").fetchone()[0],
+        "motions": con.execute("SELECT COUNT(*) FROM canonical_motions WHERE _current = TRUE").fetchone()[0],
         "note": "Single EOIR release snapshot. True monthly history requires preserving and comparing repeated monthly releases.",
     }])
     save(snapshot, "release_snapshot_tracking")
