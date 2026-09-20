@@ -34,10 +34,17 @@ def qident(name: str) -> str:
 def get_canonical_con(db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
     SILVER_DIR.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path or CANONICAL_DB))
-    # The EOIR release is large enough that a conservative local profile is
-    # more reliable on ordinary laptops than DuckDB's default parallelism.
+    # Conservative local profile: DuckDB's default parallelism is unreliable
+    # on laptops, but the canonical merges need a generous memory budget
+    # because the applications UPDATE hash-joins 16M+ rows in working memory.
+    # The previous 4 GB cap OOMed mid-run on real hardware; 10 GB is safe on
+    # any machine with >=16 GB RAM and DuckDB still spills to temp_directory
+    # when individual operators exceed the cap.
+    temp_dir = ROOT / "tmp" / "duckdb_canonical"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    con.execute(f"SET temp_directory='{temp_dir.as_posix()}'")
     con.execute("PRAGMA threads=1")
-    con.execute("PRAGMA memory_limit='4GB'")
+    con.execute("PRAGMA memory_limit='10GB'")
     con.execute("PRAGMA preserve_insertion_order=false")
     return con
 
