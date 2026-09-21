@@ -81,7 +81,7 @@ def build_judge_metrics(con: duckdb.DuckDBPyConnection) -> None:
                           AND DECISION IN {GRANT_CODES} THEN IDNAPPLICATION END) AS asylum_grants,
                 COUNT(DISTINCT CASE WHEN APPLICATION_TYPE IN {ASYLUM_CODES}
                           AND DECISION IN {ASYLUM_DECISION_CODES} THEN IDNAPPLICATION END) AS asylum_decisions
-            FROM canonical_applications
+            FROM v_canonical_applications
             GROUP BY IDNPROCEEDING
         )
         SELECT
@@ -126,8 +126,8 @@ def build_judge_metrics(con: duckdb.DuckDBPyConnection) -> None:
                     1
                 )
             ) AS years_on_bench
-        FROM canonical_proceedings p
-        LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+        FROM v_canonical_proceedings p
+        LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
         LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = p.IDNPROCEEDING
         WHERE p._current = TRUE
           AND p.IJ_CODE IS NOT NULL
@@ -163,7 +163,7 @@ def build_court_metrics(con: duckdb.DuckDBPyConnection) -> None:
                           AND DECISION IN {GRANT_CODES} THEN IDNAPPLICATION END) AS asylum_grants,
                 COUNT(DISTINCT CASE WHEN APPLICATION_TYPE IN {ASYLUM_CODES}
                           AND DECISION IN {ASYLUM_DECISION_CODES} THEN IDNAPPLICATION END) AS asylum_decisions
-            FROM canonical_applications
+            FROM v_canonical_applications
             GROUP BY IDNPROCEEDING
         )
         SELECT
@@ -185,8 +185,8 @@ def build_court_metrics(con: duckdb.DuckDBPyConnection) -> None:
                 / NULLIF(COUNT(DISTINCT p.IDNCASE), 0),
                 4
             ) AS representation_rate
-        FROM canonical_proceedings p
-        LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+        FROM v_canonical_proceedings p
+        LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
         LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = p.IDNPROCEEDING
         WHERE p._current = TRUE
           AND p.COURT IS NOT NULL
@@ -207,7 +207,7 @@ def build_nationality_metrics(con: duckdb.DuckDBPyConnection) -> None:
                           AND DECISION IN {GRANT_CODES} THEN IDNAPPLICATION END) AS asylum_grants,
                 COUNT(DISTINCT CASE WHEN APPLICATION_TYPE IN {ASYLUM_CODES}
                           AND DECISION IN {ASYLUM_DECISION_CODES} THEN IDNAPPLICATION END) AS asylum_decisions
-            FROM canonical_applications
+            FROM v_canonical_applications
             GROUP BY IDNPROCEEDING
         ),
         base AS (
@@ -220,10 +220,10 @@ def build_nationality_metrics(con: duckdb.DuckDBPyConnection) -> None:
                 COALESCE(NULLIF(c.NAT, ''), NULLIF(p.NAT, '')) AS nat_code,
                 COALESCE(NULLIF(n.NAT_COUNTRY_NAME, ''), NULLIF(n.NAT_NAME, ''),
                          COALESCE(NULLIF(c.NAT, ''), NULLIF(p.NAT, ''))) AS country_name
-            FROM canonical_cases c
-            LEFT JOIN canonical_proceedings p ON p.IDNCASE = c.IDNCASE
+            FROM v_canonical_cases c
+            LEFT JOIN v_canonical_proceedings p ON p.IDNCASE = c.IDNCASE
             LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = p.IDNPROCEEDING
-            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(c.NAT, ''), NULLIF(p.NAT, '')) AND n._current = TRUE
+            LEFT JOIN v_canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(c.NAT, ''), NULLIF(p.NAT, ''))
             WHERE c._current = TRUE
         )
         SELECT
@@ -260,7 +260,7 @@ def build_case_outcomes(con: duckdb.DuckDBPyConnection) -> None:
                     ''
                 ) AS cleaned_outcome,
                 p.IDNPROCEEDING
-            FROM canonical_proceedings p
+            FROM v_canonical_proceedings p
             WHERE p._current = TRUE
               AND {FY_EXPR} BETWEEN 1990 AND 2027
         )
@@ -324,9 +324,9 @@ def build_representation_gap(con: duckdb.DuckDBPyConnection) -> None:
                 / NULLIF(COUNT(DISTINCT p.IDNCASE), 0),
                 4
             ) AS representation_rate
-        FROM canonical_proceedings p
-        JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
-        LEFT JOIN canonical_applications a ON a.IDNPROCEEDING = p.IDNPROCEEDING
+        FROM v_canonical_proceedings p
+        JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
+        LEFT JOIN v_canonical_applications a ON a.IDNPROCEEDING = p.IDNPROCEEDING
         WHERE p._current = TRUE
           AND {FY_EXPR} BETWEEN 2000 AND 2027
         GROUP BY fiscal_year
@@ -360,7 +360,7 @@ def build_policy_trends(con: duckdb.DuckDBPyConnection) -> None:
                 / NULLIF(COUNT(DISTINCT p.IDNPROCEEDING), 0),
                 4
             ) AS in_absentia_rate
-        FROM canonical_proceedings p
+        FROM v_canonical_proceedings p
         WHERE p._current = TRUE
           AND {FY_EXPR} BETWEEN 1990 AND 2027
         GROUP BY fiscal_year
@@ -387,8 +387,8 @@ def build_in_absentia(con: duckdb.DuckDBPyConnection) -> None:
                          THEN 1 ELSE 0 END) AS unrepresented_ia_orders,
                 SUM(CASE WHEN c.ATTY_NBR IS NULL OR c.ATTY_NBR IN ('', '0')
                          THEN 1 ELSE 0 END) AS unrepresented_total
-            FROM canonical_proceedings p
-            LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+            FROM v_canonical_proceedings p
+            LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
             WHERE p._current = TRUE
               AND {FY_EXPR} BETWEEN 1990 AND 2027
             GROUP BY fiscal_year
@@ -418,7 +418,7 @@ def build_in_absentia(con: duckdb.DuckDBPyConnection) -> None:
                 4
             ) AS in_absentia_rate,
             COUNT(DISTINCT p.IDNPROCEEDING) AS case_count
-        FROM canonical_proceedings p
+        FROM v_canonical_proceedings p
         WHERE p._current = TRUE
           AND p.COURT IS NOT NULL
           AND p.COURT != ''
@@ -431,7 +431,7 @@ def build_in_absentia(con: duckdb.DuckDBPyConnection) -> None:
 
 def build_backlog_timeline(con: duckdb.DuckDBPyConnection) -> None:
     latest = con.execute("""
-        SELECT MAX(_last_seen_release) FROM canonical_cases
+        SELECT MAX(_last_seen_release) FROM v_canonical_cases
     """).fetchone()[0]
     year = int(str(latest).split("-")[0]) if latest else datetime.now().year
     df = con.execute(f"""
@@ -457,7 +457,7 @@ def build_backlog_timeline(con: duckdb.DuckDBPyConnection) -> None:
                         TRY_CAST(NULLIF(HEARING_DATE, '') AS TIMESTAMP)
                     ) AS start_date,
                     TRY_CAST(NULLIF(DECISION_DATE, '') AS TIMESTAMP) AS decision_date
-                FROM canonical_proceedings
+                FROM v_canonical_proceedings
                 WHERE _current = TRUE
             )
             WHERE start_date IS NOT NULL
@@ -522,8 +522,8 @@ def build_case_age_outputs(con: duckdb.DuckDBPyConnection) -> None:
                      THEN TRUE ELSE FALSE END AS detained,
                 CASE WHEN c.ATTY_NBR IS NOT NULL AND c.ATTY_NBR NOT IN ('', '0')
                      THEN TRUE ELSE FALSE END AS represented
-            FROM canonical_proceedings p
-            LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+            FROM v_canonical_proceedings p
+            LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
             WHERE p._current = TRUE
               AND TRY_CAST(NULLIF(p.DECISION_DATE, '') AS TIMESTAMP) IS NOT NULL
         )
@@ -560,7 +560,7 @@ def build_case_age_outputs(con: duckdb.DuckDBPyConnection) -> None:
                     TRY_CAST(NULLIF(p.DECISION_DATE, '') AS TIMESTAMP)
                 ) AS age_days,
                 CASE WHEN p.DECISION_DATE IS NULL OR p.DECISION_DATE = '' THEN TRUE ELSE FALSE END AS pending
-            FROM canonical_proceedings p
+            FROM v_canonical_proceedings p
             WHERE p._current = TRUE
               AND p.COURT IS NOT NULL
         )
@@ -590,7 +590,7 @@ def build_case_age_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 ),
                 current_timestamp
             ) AS age_days
-            FROM canonical_proceedings p
+            FROM v_canonical_proceedings p
             WHERE p._current = TRUE
               AND (p.DECISION_DATE IS NULL OR p.DECISION_DATE = '')
         )
@@ -631,7 +631,7 @@ def build_removal_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 COALESCE(NULLIF(p.OUTCOME_DESCRIPTION, ''), p.OUTCOME, 'Unknown') AS outcome_text,
                 p.NAT,
                 p.IDNPROCEEDING
-            FROM canonical_proceedings p
+            FROM v_canonical_proceedings p
             WHERE p._current = TRUE
               AND {FY_EXPR} BETWEEN 1990 AND 2027
         )
@@ -659,8 +659,8 @@ def build_removal_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COALESCE(NULLIF(n.NAT_COUNTRY_NAME, ''), NULLIF(n.NAT_NAME, ''), p.NAT) AS country,
             COUNT(DISTINCT p.IDNPROCEEDING) AS total_removals,
             0.0 AS expedited_pct
-        FROM canonical_proceedings p
-        LEFT JOIN canonical_nationalities n ON n.NAT_CODE = p.NAT AND n._current = TRUE
+        FROM v_canonical_proceedings p
+        LEFT JOIN v_canonical_nationalities n ON n.NAT_CODE = p.NAT
         WHERE p._current = TRUE
           AND p.NAT IS NOT NULL
           AND p.NAT != ''
@@ -688,7 +688,7 @@ def build_bond_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 IDNBOND,
                 DECISION,
                 COALESCE(NULLIF(NEW_BOND, 0), NULLIF(INITIAL_BOND, 0)) AS bond_amount
-            FROM canonical_bonds
+            FROM v_canonical_bonds
             WHERE _current = TRUE
         )
         SELECT
@@ -724,7 +724,7 @@ def build_detention_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 IDNCUSTODY,
                 IDNCASE,
                 DATE_DIFF('day', TRY_CAST(DATDETAINED AS TIMESTAMP), TRY_CAST(DATRELEASED AS TIMESTAMP)) AS los_days
-            FROM canonical_custody_history
+            FROM v_canonical_custody_history
             WHERE _current = TRUE
               AND TRY_CAST(DATDETAINED AS TIMESTAMP) IS NOT NULL
         )
@@ -751,11 +751,11 @@ def build_detention_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 COALESCE(NULLIF(DETENTION_FACILITY_TYPE, ''), 'Unknown') AS facility_type,
                 COUNT(DISTINCT IDNCASE) AS cases,
                 (SELECT COUNT(DISTINCT IDNCASE)
-                 FROM canonical_cases
+                 FROM v_canonical_cases
                  WHERE _current = TRUE
                    AND DETENTION_FACILITY_TYPE IS NOT NULL
                    AND DETENTION_FACILITY_TYPE != '') AS denominator
-            FROM canonical_cases
+            FROM v_canonical_cases
             WHERE _current = TRUE
               AND DETENTION_FACILITY_TYPE IS NOT NULL
               AND DETENTION_FACILITY_TYPE != ''
@@ -770,8 +770,8 @@ def build_detention_outputs(con: duckdb.DuckDBPyConnection) -> None:
                     ELSE 'EOIR custody category: unknown'
                 END AS facility_type,
                 COUNT(DISTINCT IDNCASE) AS cases,
-                (SELECT COUNT(DISTINCT IDNCASE) FROM canonical_custody_history WHERE _current = TRUE) AS denominator
-            FROM canonical_custody_history
+                (SELECT COUNT(DISTINCT IDNCASE) FROM v_canonical_custody_history) AS denominator
+            FROM v_canonical_custody_history
             WHERE _current = TRUE
               AND CUSTODY IS NOT NULL
               AND CUSTODY != ''
@@ -810,10 +810,10 @@ def build_uac_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 a.IDNAPPLICATION,
                 a.APPLICATION_TYPE,
                 a.DECISION
-            FROM canonical_juvenile_history j
-            LEFT JOIN canonical_cases c ON c.IDNCASE = j.IDNCASE AND c._current = TRUE
-            LEFT JOIN canonical_proceedings p ON p.IDNPROCEEDING = j.IDNPROCEEDING
-            LEFT JOIN canonical_applications a ON a.IDNPROCEEDING = p.IDNPROCEEDING
+            FROM v_canonical_juvenile_history j
+            LEFT JOIN v_canonical_cases c ON c.IDNCASE = j.IDNCASE
+            LEFT JOIN v_canonical_proceedings p ON p.IDNPROCEEDING = j.IDNPROCEEDING
+            LEFT JOIN v_canonical_applications a ON a.IDNPROCEEDING = p.IDNPROCEEDING
             WHERE j._current = TRUE
         )
         SELECT
@@ -850,8 +850,8 @@ def build_uac_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 END AS fiscal_year,
                 j.IDNCASE,
                 c.NAT
-            FROM canonical_juvenile_history j
-            LEFT JOIN canonical_cases c ON c.IDNCASE = j.IDNCASE AND c._current = TRUE
+            FROM v_canonical_juvenile_history j
+            LEFT JOIN v_canonical_cases c ON c.IDNCASE = j.IDNCASE
             WHERE j._current = TRUE
         )
         WHERE fiscal_year IS NOT NULL
@@ -878,7 +878,7 @@ def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 FILED_BY,
                 UPPER(TRIM(COALESCE(BIA_DECISION, ''))) AS DECISION_CODE,
                 BIA_DECISION_DATE
-            FROM canonical_appeals
+            FROM v_canonical_appeals
             WHERE _current = TRUE
         )
         SELECT
@@ -911,8 +911,8 @@ def build_appeal_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 UPPER(TRIM(COALESCE(f.FED_DECISION, ''))) AS FED_DECISION,
                 TRY_CAST(a.BIA_DECISION_DATE AS TIMESTAMP) AS BIA_DECISION_TS,
                 TRY_CAST(f.REQUESTED_BY_OIL_DATE AS TIMESTAMP) AS REQUESTED_TS
-            FROM canonical_fed_appeals f
-            LEFT JOIN canonical_appeals a ON a.IDNAPPEAL = f.IDNAPPEAL AND a._current = TRUE
+            FROM v_canonical_fed_appeals f
+            LEFT JOIN v_canonical_appeals a ON a.IDNAPPEAL = f.IDNAPPEAL
             WHERE f._current = TRUE
               AND f.REQUESTED_BY_OIL_DATE IS NOT NULL
               AND f.REQUESTED_BY_OIL_DATE != ''
@@ -953,8 +953,8 @@ def build_enhancement_trend_outputs(con: duckdb.DuckDBPyConnection) -> None:
                     p.OUTCOME,
                     p.ABSENTIA,
                     c.ATTY_NBR
-                FROM canonical_proceedings p
-                LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+                FROM v_canonical_proceedings p
+                LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
                 WHERE p._current = TRUE
                   AND p.IJ_CODE IS NOT NULL
                   AND p.IJ_CODE != ''
@@ -967,7 +967,7 @@ def build_enhancement_trend_outputs(con: duckdb.DuckDBPyConnection) -> None:
                               AND a.DECISION IN {GRANT_CODES} THEN a.IDNAPPLICATION END) AS asylum_grants,
                     COUNT(DISTINCT CASE WHEN a.APPLICATION_TYPE IN {ASYLUM_CODES}
                               AND a.DECISION IN {ASYLUM_DECISION_CODES} THEN a.IDNAPPLICATION END) AS asylum_decisions
-                FROM canonical_applications a
+                FROM v_canonical_applications a
                 JOIN (SELECT DISTINCT IDNPROCEEDING FROM py) ids ON ids.IDNPROCEEDING = a.IDNPROCEEDING
                 GROUP BY a.IDNPROCEEDING
             )
@@ -1009,8 +1009,8 @@ def build_enhancement_trend_outputs(con: duckdb.DuckDBPyConnection) -> None:
                     p.OUTCOME,
                     p.ABSENTIA,
                     c.ATTY_NBR
-                FROM canonical_proceedings p
-                LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+                FROM v_canonical_proceedings p
+                LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
                 WHERE p._current = TRUE
                   AND p.COURT IS NOT NULL
                   AND p.COURT != ''
@@ -1023,7 +1023,7 @@ def build_enhancement_trend_outputs(con: duckdb.DuckDBPyConnection) -> None:
                               AND a.DECISION IN {GRANT_CODES} THEN a.IDNAPPLICATION END) AS asylum_grants,
                     COUNT(DISTINCT CASE WHEN a.APPLICATION_TYPE IN {ASYLUM_CODES}
                               AND a.DECISION IN {ASYLUM_DECISION_CODES} THEN a.IDNAPPLICATION END) AS asylum_decisions
-                FROM canonical_applications a
+                FROM v_canonical_applications a
                 JOIN (SELECT DISTINCT IDNPROCEEDING FROM py) ids ON ids.IDNPROCEEDING = a.IDNPROCEEDING
                 GROUP BY a.IDNPROCEEDING
             )
@@ -1061,8 +1061,8 @@ def build_enhancement_trend_outputs(con: duckdb.DuckDBPyConnection) -> None:
                     p.OUTCOME,
                     c.NAT AS case_nat,
                     c.ATTY_NBR
-                FROM canonical_proceedings p
-                LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+                FROM v_canonical_proceedings p
+                LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
                 WHERE p._current = TRUE
                   AND ({FY_EXPR}) = {year}
             ),
@@ -1073,7 +1073,7 @@ def build_enhancement_trend_outputs(con: duckdb.DuckDBPyConnection) -> None:
                               AND a.DECISION IN {GRANT_CODES} THEN a.IDNAPPLICATION END) AS asylum_grants,
                     COUNT(DISTINCT CASE WHEN a.APPLICATION_TYPE IN {ASYLUM_CODES}
                               AND a.DECISION IN {ASYLUM_DECISION_CODES} THEN a.IDNAPPLICATION END) AS asylum_decisions
-                FROM canonical_applications a
+                FROM v_canonical_applications a
                 JOIN (SELECT DISTINCT IDNPROCEEDING FROM py) ids ON ids.IDNPROCEEDING = a.IDNPROCEEDING
                 GROUP BY a.IDNPROCEEDING
             )
@@ -1090,7 +1090,7 @@ def build_enhancement_trend_outputs(con: duckdb.DuckDBPyConnection) -> None:
                     / NULLIF(COUNT(DISTINCT py.IDNPROCEEDING), 0), 4) AS removal_rate
             FROM py
             LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = py.IDNPROCEEDING
-            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(py.proc_nat, ''), NULLIF(py.case_nat, '')) AND n._current = TRUE
+            LEFT JOIN v_canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(py.proc_nat, ''), NULLIF(py.case_nat, ''))
             GROUP BY 2, 3
             HAVING nat_code IS NOT NULL AND nat_code != '' AND case_count >= 50
             ORDER BY case_count DESC
@@ -1115,7 +1115,7 @@ def build_representation_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
                           AND DECISION IN {GRANT_CODES} THEN IDNAPPLICATION END) AS asylum_grants,
                 COUNT(DISTINCT CASE WHEN APPLICATION_TYPE IN {ASYLUM_CODES}
                           AND DECISION IN {ASYLUM_DECISION_CODES} THEN IDNAPPLICATION END) AS asylum_decisions
-            FROM canonical_applications
+            FROM v_canonical_applications
             GROUP BY IDNPROCEEDING
         ),
         base AS (
@@ -1128,8 +1128,8 @@ def build_representation_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 p.IDNPROCEEDING,
                 COALESCE(a.asylum_grants, 0) AS asylum_grants,
                 COALESCE(a.asylum_decisions, 0) AS asylum_decisions
-            FROM canonical_proceedings p
-            LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+            FROM v_canonical_proceedings p
+            LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
             LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = p.IDNPROCEEDING
             WHERE p._current = TRUE
         )
@@ -1160,7 +1160,7 @@ def build_representation_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
                           AND DECISION IN {GRANT_CODES} THEN IDNAPPLICATION END) AS asylum_grants,
                 COUNT(DISTINCT CASE WHEN APPLICATION_TYPE IN {ASYLUM_CODES}
                           AND DECISION IN {ASYLUM_DECISION_CODES} THEN IDNAPPLICATION END) AS asylum_decisions
-            FROM canonical_applications
+            FROM v_canonical_applications
             GROUP BY IDNPROCEEDING
         ),
         base AS (
@@ -1171,10 +1171,10 @@ def build_representation_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 p.IDNCASE,
                 COALESCE(a.asylum_grants, 0) AS asylum_grants,
                 COALESCE(a.asylum_decisions, 0) AS asylum_decisions
-            FROM canonical_proceedings p
-            LEFT JOIN canonical_cases c ON c.IDNCASE = p.IDNCASE AND c._current = TRUE
+            FROM v_canonical_proceedings p
+            LEFT JOIN v_canonical_cases c ON c.IDNCASE = p.IDNCASE
             LEFT JOIN app_by_proceeding a ON a.IDNPROCEEDING = p.IDNPROCEEDING
-            LEFT JOIN canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(p.NAT, ''), NULLIF(c.NAT, '')) AND n._current = TRUE
+            LEFT JOIN v_canonical_nationalities n ON n.NAT_CODE = COALESCE(NULLIF(p.NAT, ''), NULLIF(c.NAT, ''))
             WHERE p._current = TRUE
         )
         SELECT
@@ -1215,7 +1215,7 @@ def build_case_age_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 ) AS pending_age_days,
                 CASE WHEN DECISION_DATE IS NULL OR DECISION_DATE = '' THEN TRUE ELSE FALSE END AS pending,
                 IDNPROCEEDING
-            FROM canonical_proceedings
+            FROM v_canonical_proceedings
             WHERE _current = TRUE
         )
         SELECT
@@ -1253,7 +1253,7 @@ def build_case_age_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 ) AS pending_age_days,
                 CASE WHEN DECISION_DATE IS NULL OR DECISION_DATE = '' THEN TRUE ELSE FALSE END AS pending,
                 IDNPROCEEDING
-            FROM canonical_proceedings
+            FROM v_canonical_proceedings
             WHERE _current = TRUE
               AND IJ_CODE IS NOT NULL
               AND IJ_CODE != ''
@@ -1288,7 +1288,7 @@ def build_bond_detail_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 IJ_CODE,
                 COALESCE(NULLIF(COURT_CITY, ''), COURT) AS court_city,
                 COALESCE(NULLIF(NEW_BOND, 0), NULLIF(INITIAL_BOND, 0)) AS bond_amount
-            FROM canonical_bonds
+            FROM v_canonical_bonds
             WHERE _current = TRUE
         )
     """
@@ -1353,7 +1353,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 FIRST_VALUE(CUSTODY) OVER (PARTITION BY IDNCASE ORDER BY TRY_CAST(NULLIF(DATDETAINED, '') AS TIMESTAMP) NULLS LAST, IDNCUSTODY) AS first_custody,
                 LAST_VALUE(CUSTODY) OVER (PARTITION BY IDNCASE ORDER BY TRY_CAST(NULLIF(DATDETAINED, '') AS TIMESTAMP) NULLS LAST, IDNCUSTODY ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_custody,
                 DATE_DIFF('day', TRY_CAST(NULLIF(DATDETAINED, '') AS TIMESTAMP), TRY_CAST(NULLIF(DATRELEASED, '') AS TIMESTAMP)) AS detention_days
-            FROM canonical_custody_history
+            FROM v_canonical_custody_history
             WHERE _current = TRUE
         )
         SELECT
@@ -1378,7 +1378,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%REMAND%' THEN IDNAPPEAL END) AS remanded,
             COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%SUSTAIN%' THEN IDNAPPEAL END) AS sustained,
             COUNT(DISTINCT CASE WHEN UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%DISMISS%' OR UPPER(COALESCE(BIA_DECISION, BIA_DECISION_TYPE, '')) LIKE '%AFFIRM%' THEN IDNAPPEAL END) AS dismissed_or_affirmed
-        FROM canonical_appeals
+        FROM v_canonical_appeals
         WHERE _current = TRUE
         GROUP BY appeal_category, appeal_type, filed_by, decision_group
         HAVING appeals >= 20
@@ -1401,7 +1401,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 TRY_CAST(ADJ_ELAP_DAYS AS DOUBLE) AS elapsed_days,
                 IDNSCHEDULE,
                 IDNPROCEEDING
-            FROM canonical_schedules
+            FROM v_canonical_schedules
             WHERE _current = TRUE
         )
         SELECT
@@ -1426,7 +1426,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT IDNSCHEDULE) AS hearings,
             COUNT(DISTINCT IDNPROCEEDING) AS proceedings,
             AVG(CASE WHEN TRY_CAST(ADJ_ELAP_DAYS AS DOUBLE) BETWEEN 0 AND 5000 THEN TRY_CAST(ADJ_ELAP_DAYS AS DOUBLE) END) AS avg_elapsed_days
-        FROM canonical_schedules
+        FROM v_canonical_schedules
         WHERE _current = TRUE
         GROUP BY adjournment_reason
         HAVING hearings >= 100
@@ -1441,7 +1441,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
             COUNT(DISTINCT IDNCHARGE) AS charge_records,
             COUNT(DISTINCT IDNPROCEEDING) AS proceedings,
             COUNT(DISTINCT IDNCASE) AS cases
-        FROM canonical_charges
+        FROM v_canonical_charges
         WHERE _current = TRUE
         GROUP BY charge, charge_status
         HAVING charge_records >= 100
@@ -1454,7 +1454,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
             SELECT
                 COALESCE(NULLIF(CHARGE, ''), 'Unknown') AS charge,
                 IDNPROCEEDING
-            FROM canonical_charges
+            FROM v_canonical_charges
             WHERE _current = TRUE
               AND IDNPROCEEDING IS NOT NULL
               AND IDNPROCEEDING != ''
@@ -1464,7 +1464,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
             SELECT
                 IDNPROCEEDING,
                 COALESCE(NULLIF(OUTCOME_DESCRIPTION, ''), NULLIF(OUTCOME, ''), 'Unknown') AS outcome
-            FROM canonical_proceedings
+            FROM v_canonical_proceedings
             WHERE IDNPROCEEDING IS NOT NULL
               AND IDNPROCEEDING != ''
         )
@@ -1493,7 +1493,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 COALESCE(NULLIF(DECISION, ''), 'Pending/Unknown') AS decision,
                 IDNMOTION,
                 IDNPROCEEDING
-            FROM canonical_motions
+            FROM v_canonical_motions
             WHERE _current = TRUE
         )
         SELECT
@@ -1525,7 +1525,7 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
                 PRIME_ATTORNEY,
                 IDNREPASSIGNMENT,
                 IDNCASE
-            FROM canonical_rep_assignments
+            FROM v_canonical_rep_assignments
             WHERE _current = TRUE
         )
         SELECT
@@ -1546,18 +1546,18 @@ def build_extended_event_outputs(con: duckdb.DuckDBPyConnection) -> None:
 
 def build_quality_and_snapshot_outputs(con: duckdb.DuckDBPyConnection) -> None:
     tables = [
-        ("canonical_cases", "IDNCASE"),
-        ("canonical_proceedings", "IDNPROCEEDING"),
-        ("canonical_applications", "IDNAPPLICATION"),
-        ("canonical_bonds", "IDNBOND"),
-        ("canonical_custody_history", "IDNCUSTODY"),
-        ("canonical_juvenile_history", "IDNJUVENILEHISTORY"),
-        ("canonical_appeals", "IDNAPPEAL"),
-        ("canonical_fed_appeals", "IDNFEDAPPEAL"),
-        ("canonical_schedules", "IDNSCHEDULE"),
-        ("canonical_charges", "IDNCHARGE"),
-        ("canonical_rep_assignments", "IDNREPASSIGNMENT"),
-        ("canonical_motions", "IDNMOTION"),
+        ("v_canonical_cases", "IDNCASE"),
+        ("v_canonical_proceedings", "IDNPROCEEDING"),
+        ("v_canonical_applications", "IDNAPPLICATION"),
+        ("v_canonical_bonds", "IDNBOND"),
+        ("v_canonical_custody_history", "IDNCUSTODY"),
+        ("v_canonical_juvenile_history", "IDNJUVENILEHISTORY"),
+        ("v_canonical_appeals", "IDNAPPEAL"),
+        ("v_canonical_fed_appeals", "IDNFEDAPPEAL"),
+        ("v_canonical_schedules", "IDNSCHEDULE"),
+        ("v_canonical_charges", "IDNCHARGE"),
+        ("v_canonical_rep_assignments", "IDNREPASSIGNMENT"),
+        ("v_canonical_motions", "IDNMOTION"),
     ]
     rows = []
     for table, key in tables:
@@ -1578,31 +1578,31 @@ def build_quality_and_snapshot_outputs(con: duckdb.DuckDBPyConnection) -> None:
     save(pd.DataFrame(rows), "data_quality_summary")
 
     snapshot = pd.DataFrame([{
-        "release_tag": con.execute("SELECT MAX(_last_seen_release) FROM canonical_cases").fetchone()[0],
-        "cases": con.execute("SELECT COUNT(*) FROM canonical_cases").fetchone()[0],
-        "proceedings": con.execute("SELECT COUNT(*) FROM canonical_proceedings").fetchone()[0],
-        "applications": con.execute("SELECT COUNT(*) FROM canonical_applications").fetchone()[0],
-        "bonds": con.execute("SELECT COUNT(*) FROM canonical_bonds WHERE _current = TRUE").fetchone()[0],
-        "custody_history": con.execute("SELECT COUNT(*) FROM canonical_custody_history WHERE _current = TRUE").fetchone()[0],
-        "schedules": con.execute("SELECT COUNT(*) FROM canonical_schedules WHERE _current = TRUE").fetchone()[0],
-        "charges": con.execute("SELECT COUNT(*) FROM canonical_charges WHERE _current = TRUE").fetchone()[0],
-        "motions": con.execute("SELECT COUNT(*) FROM canonical_motions WHERE _current = TRUE").fetchone()[0],
+        "release_tag": con.execute("SELECT MAX(_last_seen_release) FROM v_canonical_cases").fetchone()[0],
+        "cases": con.execute("SELECT COUNT(*) FROM v_canonical_cases").fetchone()[0],
+        "proceedings": con.execute("SELECT COUNT(*) FROM v_canonical_proceedings").fetchone()[0],
+        "applications": con.execute("SELECT COUNT(*) FROM v_canonical_applications").fetchone()[0],
+        "bonds": con.execute("SELECT COUNT(*) FROM v_canonical_bonds").fetchone()[0],
+        "custody_history": con.execute("SELECT COUNT(*) FROM v_canonical_custody_history").fetchone()[0],
+        "schedules": con.execute("SELECT COUNT(*) FROM v_canonical_schedules").fetchone()[0],
+        "charges": con.execute("SELECT COUNT(*) FROM v_canonical_charges").fetchone()[0],
+        "motions": con.execute("SELECT COUNT(*) FROM v_canonical_motions").fetchone()[0],
         "note": "Single EOIR release snapshot. True monthly history requires preserving and comparing repeated monthly releases.",
     }])
     save(snapshot, "release_snapshot_tracking")
 
 
 def write_pipeline_status(con: duckdb.DuckDBPyConnection) -> None:
-    total_cases = con.execute("SELECT COUNT(*) FROM canonical_cases WHERE _current = TRUE").fetchone()[0]
-    total_procs = con.execute("SELECT COUNT(*) FROM canonical_proceedings WHERE _current = TRUE").fetchone()[0]
-    total_apps = con.execute("SELECT COUNT(*) FROM canonical_applications WHERE _current = TRUE").fetchone()[0]
+    total_cases = con.execute("SELECT COUNT(*) FROM v_canonical_cases").fetchone()[0]
+    total_procs = con.execute("SELECT COUNT(*) FROM v_canonical_proceedings").fetchone()[0]
+    total_apps = con.execute("SELECT COUNT(*) FROM v_canonical_applications").fetchone()[0]
     deletions = con.execute("""
         SELECT
             (SELECT COUNT(*) FROM canonical_cases WHERE _ever_deleted = TRUE)
           + (SELECT COUNT(*) FROM canonical_proceedings WHERE _ever_deleted = TRUE)
           + (SELECT COUNT(*) FROM canonical_applications WHERE _ever_deleted = TRUE)
     """).fetchone()[0]
-    latest_release = con.execute("SELECT MAX(_last_seen_release) FROM canonical_cases").fetchone()[0] or ""
+    latest_release = con.execute("SELECT MAX(_last_seen_release) FROM v_canonical_cases").fetchone()[0] or ""
 
     status = {
         "last_release": latest_release,

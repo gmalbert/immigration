@@ -176,8 +176,8 @@
   "TC": "UNITED ARAB EMIRATES",
   "DA": "DENMARK",
   "CN": "COMORO ISLANDS",
-  "PS": "THE REPUBLIC OF PALAU",
   "BA": "BAHRAIN",
+  "PS": "THE REPUBLIC OF PALAU",
   "GP": "GUADELOUPE",
   "NO": "NORWAY",
   "FG": "FRENCH GUIANA",
@@ -198,8 +198,8 @@
   "MP": "MAURITIUS",
   "KR": "KIRIBATI",
   "IC": "ICELAND",
-  "QA": "QATAR",
   "GC": "EAST GERMANY",
+  "QA": "QATAR",
   "BC": "BOTSWANA",
   "CJ": "CAYMAN ISLANDS",
   "NE": "NIUE",
@@ -224,8 +224,8 @@
   "US": "US",
   "BW": "BRITISH WEST INDIES",
   "FP": "FRENCH POLYNESIA",
-  "MN": "MONACO",
   "IU": "IN ABSENTIA/UNKNOWN",
+  "MN": "MONACO",
   "GZ": "GAZA STRIP",
   "LU": "LUXEMBOURG",
   "VT": "VT",
@@ -238,6 +238,6 @@
   "KO": "KO",
   "NQ": "NQ",
   "FA": "FALKLAND ISLANDS",
-  "UV": "UPPER VOLTA",
-  "TP": "SAO TOME AND PRINCIPE"
+  "TP": "SAO TOME AND PRINCIPE",
+  "UV": "UPPER VOLTA"
 }

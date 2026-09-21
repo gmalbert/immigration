@@ -371,6 +371,34 @@ def init_canonical(con: duckdb.DuckDBPyConnection) -> None:
             deletions_flagged      BIGINT
         )
     """)
+
+    # Create v_canonical_<table> views that filter to _current = TRUE.
+    # Downstream tooling (aggregate.py, ad-hoc analyses) reads from these
+    # views so it never has to remember the _current clause. canonical.py
+    # itself continues to write to the underlying canonical_X tables so the
+    # historical archive is preserved.
+    for table_name in (
+        "canonical_cases",
+        "canonical_proceedings",
+        "canonical_applications",
+        "canonical_nationalities",
+        "canonical_bonds",
+        "canonical_custody_history",
+        "canonical_juvenile_history",
+        "canonical_appeals",
+        "canonical_fed_appeals",
+        "canonical_three_member_referrals",
+        "canonical_schedules",
+        "canonical_charges",
+        "canonical_rep_assignments",
+        "canonical_attorneys",
+        "canonical_motions",
+    ):
+        con.execute(
+            f"CREATE OR REPLACE VIEW {qident('v_' + table_name)} AS "
+            f"SELECT * FROM {qident(table_name)} WHERE _current = TRUE"
+        )
+
     con.execute("CHECKPOINT")
 
 
