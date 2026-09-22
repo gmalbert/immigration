@@ -199,6 +199,20 @@ def main() -> int:
     if not stages_to_run:
         parser.error("No stages to run after applying --skip flags.")
 
+    # Cheap no-change exit: if every requested stage is already marked done
+    # for this release and --force wasn't set, there's nothing to do. Lets
+    # the GitHub Actions cron run weekly (or daily) without burning cycles
+    # on weeks where EOIR hasn't shipped a new release.
+    if not args.force and all(_is_stage_done(state, release_tag, s) for s in stages_to_run):
+        latest = max(state[release_tag][s].get("at") or "" for s in stages_to_run)
+        log.info(
+            "All requested stages for release %s already done (latest at %s). "
+            "Use --force to rerun.",
+            release_tag, latest,
+        )
+        _print_status(state, release_tag)
+        return 0
+
     log.info("Refresh plan: release=%s stages=%s force=%s", release_tag, stages_to_run, args.force)
     _print_status(state, release_tag)
     print()
