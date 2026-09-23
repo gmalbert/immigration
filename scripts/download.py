@@ -3,14 +3,20 @@ scripts/download.py — Archive a monthly EOIR FOIA release.
 
 Usage:
     python scripts/download.py
+    python scripts/download.py --release 2026-09
 
 Saves the release to bronze/YYYY-MM/ with metadata and checksum.
-Skips download if the current month's release is already archived.
+Skips download if the requested release is already archived.
 
-EOIR does not publish a release calendar. Run this script monthly;
-it will detect whether a new file is available vs. what's cached.
+EOIR does not publish a release calendar and the FOIA page only exposes the
+current release. Run this script monthly; it will detect whether a new file
+is available vs. what's cached. To target a specific release, pass
+``--release YYYY-MM`` — but note the script will refuse to download a release
+other than the current month from the FOIA page. For historical releases,
+pre-populate ``bronze/<release>/`` manually.
 """
 
+import argparse
 import os
 import sys
 import logging
@@ -35,18 +41,30 @@ ROOT = Path(__file__).parent.parent
 BRONZE_DIR = ROOT / "bronze"
 
 
-def archive_current_release() -> Path:
+def archive_release(release_tag: str | None = None) -> Path:
     """
-    Download and archive the current EOIR monthly release.
+    Download and archive an EOIR release. ``release_tag`` defaults to the
+    current month. The FOIA page only exposes the current release, so a
+    non-current ``release_tag`` is rejected unless the bronze folder for
+    that tag is already populated.
     Returns the bronze release directory.
     """
-    release_tag = datetime.now().strftime("%Y-%m")
+    current_tag = datetime.now().strftime("%Y-%m")
+    release_tag = release_tag or current_tag
     release_dir = BRONZE_DIR / release_tag
 
     # Check if already archived
     if (release_dir / "A_TblCase.txt").exists():
         log.info("Release %s already archived at %s", release_tag, release_dir)
         return release_dir
+
+    if release_tag != current_tag:
+        raise RuntimeError(
+            f"Cannot download historical release {release_tag}: the EOIR FOIA "
+            f"page only exposes the current release ({current_tag}). Pre-"
+            f"populate bronze/{release_tag}/ with the extracted EOIR tables "
+            f"and re-run, or omit --release to download the current release."
+        )
 
     log.info("Fetching EOIR FOIA page to discover download URL…")
     url = get_current_release_url()
@@ -88,5 +106,17 @@ def archive_current_release() -> Path:
     return release_dir
 
 
+def archive_current_release() -> Path:
+    """Backwards-compatible wrapper: archive the current month's release."""
+    return archive_release()
+
+
 if __name__ == "__main__":
-    archive_current_release()
+    parser = argparse.ArgumentParser(description="Archive an EOIR monthly release to bronze/")
+    parser.add_argument(
+        "--release",
+        default=None,
+        help="Release tag YYYY-MM. Defaults to the current month.",
+    )
+    args = parser.parse_args()
+    archive_release(args.release)

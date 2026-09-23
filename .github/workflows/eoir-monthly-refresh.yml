@@ -1,0 +1,66 @@
+name: EOIR Monthly Refresh
+
+on:
+  # Weekly Saturday at 02:00 UTC (= 22:00 Friday ET, = 19:00 PT). Catches
+  # early-week EOIR releases without burning Actions minutes daily. Switch
+  # to a monthly cron once you trust the rhythm.
+  schedule:
+    - cron: '0 2 * * 6'
+  # Manual trigger from the Actions tab for one-off runs.
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release tag YYYY-MM. Defaults to the current month.'
+        required: false
+      force:
+        description: 'Bypass the no-change early-exit in refresh.py.'
+        type: boolean
+        default: false
+
+jobs:
+  refresh:
+    # The self-hosted runner on your workstation (or other always-on host)
+    # handles persistence for silver/ and canonical. The labels must match
+    # what was passed to `config.cmd --labels` when you registered it.
+    runs-on: [self-hosted, windows, immigration]
+
+    # 6h ceiling matches GitHub's default job timeout for self-hosted
+    # runners. canonical itself can take ~9h, but the no-change exit keeps
+    # no-op runs under 1 min; if you ever need a full canonical run, do it
+    # manually on the workstation.
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create venv and install dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+      - name: Run refresh
+        shell: pwsh
+        run: |
+          $release = "${{ inputs.release }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($release)) {
+            $release = (Get-Date -Format 'yyyy-MM')
+          }
+          $forceFlag = ''
+          if ("${{ inputs.force }}" -eq 'true') { $forceFlag = '--force' }
+          New-Item -ItemType Directory -Path tmp\heartbeat -Force | Out-Null
+          & .\.venv\Scripts\python.exe scripts\refresh.py @('--release', $release, $forceFlag) 2>&1 |
+              Tee-Object -FilePath tmp\heartbeat\last_run.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::refresh.py exited $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+        env:
+          PYTHONUNBUFFERED: '1'
+          # Add refresh.py secrets here once you have any (none today).
