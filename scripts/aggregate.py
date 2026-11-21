@@ -23,9 +23,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).parent.parent
-CANONICAL_DB = ROOT / "silver" / "canonical.duckdb"
-DATA_DIR = ROOT / "data"
+REFRESH_ROOT = Path(os.environ.get("EOIR_REFRESH_ROOT", Path(__file__).parent.parent))
+CANONICAL_DB = REFRESH_ROOT / "silver" / "canonical.duckdb"
+DATA_DIR = REFRESH_ROOT / "data"
 
 FY_EXPR = """
 CASE
@@ -48,7 +48,7 @@ def get_con(db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
         raise FileNotFoundError(
             f"Canonical DB not found: {canonical_db}\nRun scripts/canonical.py first."
         )
-    temp_dir = ROOT / "tmp" / "duckdb_aggregate"
+    temp_dir = REFRESH_ROOT / "tmp" / "duckdb_aggregate"
     temp_dir.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(canonical_db), read_only=True)
     con.execute("SET preserve_insertion_order=false")

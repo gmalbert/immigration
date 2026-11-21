@@ -37,8 +37,8 @@ from utils.eoir_api import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).parent.parent
-BRONZE_DIR = ROOT / "bronze"
+REFRESH_ROOT = Path(os.environ.get("EOIR_REFRESH_ROOT", Path(__file__).parent.parent))
+BRONZE_DIR = REFRESH_ROOT / "bronze"
 
 
 def archive_release(release_tag: str | None = None) -> Path:

@@ -22,8 +22,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).parent.parent
-SILVER_DIR = ROOT / "silver"
+REFRESH_ROOT = Path(os.environ.get("EOIR_REFRESH_ROOT", Path(__file__).parent.parent))
+SILVER_DIR = REFRESH_ROOT / "silver"
 CANONICAL_DB = SILVER_DIR / "canonical.duckdb"
 
 
@@ -40,7 +40,7 @@ def get_canonical_con(db_path: Path | None = None) -> duckdb.DuckDBPyConnection:
     # The previous 4 GB cap OOMed mid-run on real hardware; 10 GB is safe on
     # any machine with >=16 GB RAM and DuckDB still spills to temp_directory
     # when individual operators exceed the cap.
-    temp_dir = ROOT / "tmp" / "duckdb_canonical"
+    temp_dir = REFRESH_ROOT / "tmp" / "duckdb_canonical"
     temp_dir.mkdir(parents=True, exist_ok=True)
     con.execute(f"SET temp_directory='{temp_dir.as_posix()}'")
     con.execute("PRAGMA threads=1")
