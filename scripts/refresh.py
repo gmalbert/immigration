@@ -32,9 +32,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = ROOT / "scripts"
-BRONZE_DIR = ROOT / "bronze"
-SILVER_DIR = ROOT / "silver"
-DATA_DIR = ROOT / "data"
+REFRESH_ROOT = Path(os.environ.get("EOIR_REFRESH_ROOT", ROOT))
+BRONZE_DIR = REFRESH_ROOT / "bronze"
+SILVER_DIR = REFRESH_ROOT / "silver"
+DATA_DIR = REFRESH_ROOT / "data"
 STATE_FILE = DATA_DIR / ".pipeline_stages.json"
 
 STAGES = ("download", "ingest", "canonical", "aggregate")

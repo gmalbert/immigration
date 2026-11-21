@@ -19,16 +19,11 @@ on:
 
 jobs:
   refresh:
-    # The self-hosted runner on your workstation (or other always-on host)
-    # handles persistence for silver/ and canonical. The labels must match
-    # what was passed to `config.cmd --labels` when you registered it.
+    # Use the same dedicated Windows runner for each refresh.
     runs-on: [self-hosted, windows, immigration]
 
-    # 6h ceiling matches GitHub's default job timeout for self-hosted
-    # runners. canonical itself can take ~9h, but the no-change exit keeps
-    # no-op runs under 1 min; if you ever need a full canonical run, do it
-    # manually on the workstation.
-    timeout-minutes: 360
+    # Full canonical merges can take about nine hours.
+    timeout-minutes: 720
 
     steps:
       - uses: actions/checkout@v4
@@ -48,19 +43,24 @@ jobs:
       - name: Run refresh
         shell: pwsh
         run: |
-          $release = "${{ inputs.release }}".Trim()
+          # Store data beside the checkout so git clean cannot remove it.
+          $env:EOIR_REFRESH_ROOT = Join-Path (Split-Path -Parent $env:GITHUB_WORKSPACE) 'eoir-refresh-data'
+          $release = ([string]$env:EOIR_RELEASE).Trim()
           if ([string]::IsNullOrWhiteSpace($release)) {
             $release = (Get-Date -Format 'yyyy-MM')
           }
-          $forceFlag = ''
-          if ("${{ inputs.force }}" -eq 'true') { $forceFlag = '--force' }
-          New-Item -ItemType Directory -Path tmp\heartbeat -Force | Out-Null
-          & .\.venv\Scripts\python.exe scripts\refresh.py @('--release', $release, $forceFlag) 2>&1 |
-              Tee-Object -FilePath tmp\heartbeat\last_run.log
+          $refreshArgs = @('--release', $release)
+          if ($env:EOIR_FORCE -eq 'true') { $refreshArgs += '--force' }
+          $logDir = Join-Path $env:EOIR_REFRESH_ROOT 'tmp\heartbeat'
+          New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+          & .\.venv\Scripts\python.exe scripts\refresh.py @refreshArgs 2>&1 |
+              Tee-Object -FilePath (Join-Path $logDir 'last_run.log')
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::refresh.py exited $LASTEXITCODE"
             exit $LASTEXITCODE
           }
         env:
+          EOIR_RELEASE: ${{ inputs.release }}
+          EOIR_FORCE: ${{ inputs.force }}
           PYTHONUNBUFFERED: '1'
           # Add refresh.py secrets here once you have any (none today).

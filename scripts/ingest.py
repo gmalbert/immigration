@@ -24,9 +24,9 @@ from utils.eoir_api import EOIR_TABLE_PKS, EOIR_TABLE_ALTERNATIVES, load_eoir_ta
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-ROOT = Path(__file__).parent.parent
-BRONZE_DIR = ROOT / "bronze"
-SILVER_DIR = ROOT / "silver"
+REFRESH_ROOT = Path(os.environ.get("EOIR_REFRESH_ROOT", Path(__file__).parent.parent))
+BRONZE_DIR = REFRESH_ROOT / "bronze"
+SILVER_DIR = REFRESH_ROOT / "silver"
 
 CORE_TABLES = [
     "A_TblCase",
